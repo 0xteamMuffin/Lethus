@@ -1,26 +1,39 @@
+"""
+DYCP Core - Dynamic Context Pruning using Kadane's Algorithm.
+Implements the algorithm from "Dynamic Context Pruning for Long-Form Dialogue" paper.
+
+Key concepts:
+- tau (0.6): Gain threshold - shifts z-scores so only significantly above-average turns have positive gain
+- theta (1.0): Stopping threshold - terminates span if cumulative gain drops more than theta from peak
+"""
 import numpy as np
-from sentence_transformers import SentenceTransformer
-from typing import List, Dict, Tuple, Optional
+from typing import List, Tuple, Optional
+
+from ..config import settings
+
 
 class DYCPCore:
-    def __init__(self, model_name: str = "all-MiniLM-L6-v2", decay_lambda: float = 0.98):
+    """
+    Core DYCP implementation with Kadane's Algorithm and Semantic Decay.
+    """
+    
+    def __init__(
+        self,
+        tau: float = None,
+        theta: float = None,
+        decay_lambda: float = None
+    ):
         """
-        Initialize the DYCP Core with a local embedding model.
+        Initialize DYCP Core.
         
         Args:
-            model_name: HuggingFace model for embeddings
-            decay_lambda: Time decay factor (0.98 = 2% decay per turn)
+            tau: Gain threshold (default from config: 0.6)
+            theta: Stopping threshold (default from config: 1.0)
+            decay_lambda: Time decay factor (default from config: 0.98)
         """
-        self.model = SentenceTransformer(model_name)
-        self.tau = 0.6  # Gain threshold from paper
-        self.theta = 1.0  # Stopping threshold from paper
-        self.decay_lambda = decay_lambda
-
-    def embed_text(self, text: str) -> np.ndarray:
-        return self.model.encode(text, convert_to_numpy=True)
-    
-    def embed_batch(self, texts: List[str]) -> np.ndarray:
-        return self.model.encode(texts, convert_to_numpy=True)
+        self.tau = tau or settings.dycp_tau
+        self.theta = theta or settings.dycp_theta
+        self.decay_lambda = decay_lambda or settings.decay_lambda
 
     def compute_relevance(
         self,
@@ -31,14 +44,17 @@ class DYCPCore:
         apply_decay: bool = True
     ) -> np.ndarray:
         """
-        Compute cosine similarity with optional time decay.
+        Compute cosine similarity with optional semantic decay.
         
         Args:
-            query_emb: Query embedding vector
+            query_emb: Query embedding vector (D,)
             history_embs: Matrix of history embeddings (N x D)
             turn_indices: Array of turn indices for each history entry
             current_turn: Current turn number (for decay calculation)
             apply_decay: Whether to apply semantic decay
+            
+        Returns:
+            Array of relevance scores (N,)
         """
         if len(history_embs) == 0:
             return np.array([])
@@ -50,7 +66,7 @@ class DYCPCore:
         dot_products = np.dot(history_embs, query_emb)
         similarities = dot_products / (norm_history * norm_query + 1e-9)
         
-        # Apply Semantic Decay if enabled
+        # Apply Semantic Decay: older turns need higher base similarity to be relevant
         if apply_decay and turn_indices is not None and current_turn is not None:
             ages = current_turn - turn_indices
             decay_factors = np.power(self.decay_lambda, ages)
@@ -63,10 +79,8 @@ class DYCPCore:
         KadaneDial: Modified Kadane's algorithm for dynamic context span selection.
         
         From the DYCP paper (Section 5.4):
-        - τ (tau) = 0.6: Gain threshold - shifts z-scores so only significantly 
-          above-average turns have positive gain
-        - θ (theta) = 1.0: Stopping threshold - if cumulative gain drops more than 
-          theta from peak, terminate the span at the peak position
+        - tau: Gain threshold - shifts z-scores so only significantly above-average turns have positive gain
+        - theta: Stopping threshold - if cumulative gain drops more than theta from peak, terminate span
         
         The algorithm finds MULTIPLE contiguous spans where cumulative gain is positive,
         using theta-based early stopping to avoid including trailing low-relevance turns.
@@ -86,8 +100,8 @@ class DYCPCore:
         mean = np.mean(similarities)
         z_scores = (similarities - mean) / std
 
-        # 2. Calculate Gain = z_score - τ
-        # Positive gain means the turn is more than τ standard deviations above mean
+        # 2. Calculate Gain = z_score - tau
+        # Positive gain means the turn is more than tau standard deviations above mean
         gains = z_scores - self.tau
 
         # 3. KadaneDial: Find spans with positive cumulative gain
@@ -118,7 +132,7 @@ class DYCPCore:
                     peak_cumulative = cumulative
                     peak_end = i
                 
-                # θ-based early stopping: drop from peak exceeds theta
+                # theta-based early stopping: drop from peak exceeds theta
                 drop_from_peak = peak_cumulative - cumulative
                 if drop_from_peak > self.theta:
                     break
@@ -134,8 +148,45 @@ class DYCPCore:
                 selected_spans.append((span_start, peak_end))
             
             # Continue scanning from after the span end
-            # Use max to ensure forward progress even if we broke early
             i = max(i, peak_end + 1)
         
         return selected_spans
 
+    def format_context(
+        self,
+        turns: List[dict],
+        spans: List[Tuple[int, int]],
+        header: str = "RELEVANT CONTEXT (DYCP)"
+    ) -> str:
+        """
+        Format selected spans into a context string.
+        
+        Args:
+            turns: List of turn dictionaries with 'role' and 'content' keys
+            spans: List of (start, end) index tuples
+            header: Header text for the context block
+            
+        Returns:
+            Formatted context string
+        """
+        if not spans:
+            return "No relevant context found in memory."
+        
+        context_str = f"--- {header} ---\n"
+        
+        prev_end = -1
+        for start, end in spans:
+            if start > prev_end + 1:
+                context_str += "\n[...earlier context omitted...]\n\n"
+            
+            for i in range(start, end + 1):
+                if i < len(turns):
+                    t = turns[i]
+                    role = t.get("role", "unknown").upper()
+                    content = t.get("content", "")
+                    context_str += f"[{role}]: {content}\n"
+            
+            prev_end = end
+        
+        context_str += "\n--- END CONTEXT ---"
+        return context_str

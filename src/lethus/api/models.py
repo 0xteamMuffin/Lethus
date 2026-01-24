@@ -1,23 +1,19 @@
+"""
+Pydantic models for REST API requests and responses.
+"""
 from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 
+
+# === Request Models ===
 
 class MessageRequest(BaseModel):
     """Request for sending a message"""
     conversation_id: Optional[int] = None
     user_id: str
     message: str
-    openai_api_key: str
-    
-
-class MessageResponse(BaseModel):
-    """Response from the assistant"""
-    conversation_id: int
-    turn_id: int
-    message: str
-    retrieved_context: List[Dict[str, Any]]
-    metadata: Dict[str, Any]
+    openai_api_key: Optional[str] = None  # Optional per-request API key
 
 
 class ConversationCreate(BaseModel):
@@ -25,6 +21,8 @@ class ConversationCreate(BaseModel):
     user_id: str
     title: Optional[str] = "New Conversation"
 
+
+# === Response Models ===
 
 class ConversationResponse(BaseModel):
     """Conversation details"""
@@ -55,16 +53,31 @@ class TurnResponse(BaseModel):
 
 class MemorySpan(BaseModel):
     """A span of conversation memory"""
-    turn_ids: List[int]
+    start_index: int
+    end_index: int
     turns: List[Dict[str, Any]]
     relevance_score: float
-    start_turn: int
-    end_turn: int
 
 
 class RetrievalResult(BaseModel):
     """Result from memory retrieval"""
     pinned_memories: List[Dict[str, Any]]
-    relevant_spans: List[MemorySpan]
-    total_tokens: int
-    confidence_score: float
+    spans: List[MemorySpan]
+    confidence: Dict[str, Any]
+
+
+class MessageResponse(BaseModel):
+    """Response from the assistant"""
+    conversation_id: int
+    turn_id: int
+    message: str
+    retrieved_context: Dict[str, Any]
+    metadata: Dict[str, Any]
+
+
+class MemoryStats(BaseModel):
+    """Memory system statistics"""
+    total_turns: int
+    tracked_entities: int
+    cache_size: int
+    decay_lambda: float
