@@ -38,7 +38,7 @@ class Turn(Base):
     importance_score = Column(Float, default=0.0)
     is_pinned = Column(Boolean, default=False)
     entities_json = Column(Text, default="[]")  # JSON list of entity names
-    metadata = Column(JSON, default={})
+    extra_data = Column(JSON, default={})
 
 
 class PinnedMemory(Base):
@@ -51,7 +51,7 @@ class PinnedMemory(Base):
     content = Column(Text)
     importance_score = Column(Float)
     created_at = Column(DateTime, default=datetime.utcnow)
-    metadata = Column(JSON, default={})
+    extra_data = Column(JSON, default={})
 
 
 class PostgresStorage:

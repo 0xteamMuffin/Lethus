@@ -3,6 +3,10 @@ __pycache__/
 *.py[codz]
 *$py.class
 fe/
+
+# Docker volumes
+docker/volumes/
+
 # C extensions
 *.so
 

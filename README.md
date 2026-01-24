@@ -83,6 +83,11 @@ This starts:
 ### 2. Install Lethus
 
 ```bash
+# Create and activate virtual environment
+python -m venv .venv
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+
+# Install package
 pip install -e .
 python -m spacy download en_core_web_sm
 ```
