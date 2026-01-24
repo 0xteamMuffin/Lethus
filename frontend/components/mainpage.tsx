@@ -57,6 +57,7 @@ const LibreChatInterface: React.FC<LibreChatInterfaceProps> = ({
   const [hasApiKey, setHasApiKey] = useState<boolean>(false);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const [lastDycpStats, setLastDycpStats] = useState<DYCPStats | null>(null);
+  const [streamingMessageId, setStreamingMessageId] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const streamingMessageRef = useRef<string>("");
@@ -220,6 +221,7 @@ const LibreChatInterface: React.FC<LibreChatInterfaceProps> = ({
     };
 
     setMessages((prev) => [...prev, userMessage, aiMessage]);
+    setStreamingMessageId(aiMessageId);
     
     const newUserMessage: APIChatMessage = { role: "user", content: message };
     const updatedHistory = [...chatHistory, newUserMessage];
@@ -259,6 +261,7 @@ const LibreChatInterface: React.FC<LibreChatInterfaceProps> = ({
           );
         },
         (stats) => {
+          setStreamingMessageId(null);
           setLastDycpStats(stats);
           if (stats.tokensSaved > 0) {
             toast.success(`DYCP saved ~${stats.tokensSaved.toLocaleString()} tokens`);
@@ -287,6 +290,7 @@ const LibreChatInterface: React.FC<LibreChatInterfaceProps> = ({
       setChatHistory(updatedHistory.slice(0, -1));
     } finally {
       setIsSending(false);
+      setStreamingMessageId(null);
     }
   };
 
@@ -381,6 +385,7 @@ const LibreChatInterface: React.FC<LibreChatInterfaceProps> = ({
                 content={msg.content}
                 sender={msg.sender}
                 timestamp={msg.timestamp}
+                isStreaming={msg.id === streamingMessageId}
               />
             ))}
             <div ref={messagesEndRef} />

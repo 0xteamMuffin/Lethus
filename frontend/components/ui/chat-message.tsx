@@ -1,13 +1,14 @@
 import React from "react";
-import { User } from "lucide-react";
+import { User, Loader2 } from "lucide-react";
 
 interface ChatMessageProps {
   content: string;
   sender: "user" | "ai";
   timestamp?: string;
+  isStreaming?: boolean;
 }
 
-const ChatMessage: React.FC<ChatMessageProps> = ({ content, sender, timestamp }) => {
+const ChatMessage: React.FC<ChatMessageProps> = ({ content, sender, timestamp, isStreaming }) => {
   const isUser = sender === "user";
 
   return (
@@ -21,7 +22,11 @@ const ChatMessage: React.FC<ChatMessageProps> = ({ content, sender, timestamp })
             </div>
           ) : (
             <div className="h-8 w-8 md:h-9 md:w-9 rounded-full bg-white flex items-center justify-center shadow-lg shadow-white/5">
-                <span className="text-black text-xs md:text-sm font-bold">L</span>
+                {isStreaming && !content ? (
+                  <Loader2 size={16} className="animate-spin text-black" />
+                ) : (
+                  <span className="text-black text-xs md:text-sm font-bold">L</span>
+                )}
             </div>
           )}
         </div>
@@ -39,10 +44,19 @@ const ChatMessage: React.FC<ChatMessageProps> = ({ content, sender, timestamp })
                     : "bg-transparent text-gray-200 pl-0 pt-0"
                 }`}
             >
-                <p>{content}</p>
+                {!isUser && isStreaming && !content ? (
+                  <span className="text-gray-500">Thinking...</span>
+                ) : (
+                  <p>
+                    {content}
+                    {isStreaming && content && (
+                      <span className="inline-block w-2 h-4 ml-0.5 bg-gray-400 animate-pulse" />
+                    )}
+                  </p>
+                )}
             </div>
 
-            {timestamp && (
+            {timestamp && !isStreaming && (
                 <span className={`text-[10px] text-gray-600 mt-1.5 font-mono ${isUser ? "mr-1" : "ml-1"}`}>
                     {timestamp}
                 </span>

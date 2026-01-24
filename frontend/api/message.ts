@@ -150,26 +150,63 @@ export async function streamChatCompletion(
     throw new Error("No response body");
   }
 
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
+  let buffer = "";
 
-    const chunk = decoder.decode(value, { stream: true });
-    const lines = chunk.split("\n");
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
 
-    for (const line of lines) {
-      if (line.startsWith("data: ") && line !== "data: [DONE]") {
-        try {
-          const data = JSON.parse(line.slice(6));
-          const content = data.choices?.[0]?.delta?.content;
-          if (content) {
-            onChunk(content);
+      buffer += decoder.decode(value, { stream: true });
+      
+      // Process complete lines from buffer
+      const lines = buffer.split("\n");
+      // Keep the last potentially incomplete line in buffer
+      buffer = lines.pop() || "";
+
+      for (const line of lines) {
+        const trimmedLine = line.trim();
+        
+        if (trimmedLine === "") continue;
+        if (trimmedLine === "data: [DONE]") continue;
+        
+        if (trimmedLine.startsWith("data: ")) {
+          try {
+            const jsonStr = trimmedLine.slice(6);
+            const data = JSON.parse(jsonStr);
+            
+            // Check for error in stream
+            if (data.error) {
+              throw new Error(data.error);
+            }
+            
+            const content = data.choices?.[0]?.delta?.content;
+            if (content) {
+              onChunk(content);
+            }
+          } catch (e) {
+            // Skip invalid JSON chunks
+            if (e instanceof SyntaxError) continue;
+            throw e;
           }
-        } catch {
-          // Skip invalid JSON
         }
       }
     }
+    
+    // Process any remaining buffer
+    if (buffer.trim() && buffer.trim().startsWith("data: ") && buffer.trim() !== "data: [DONE]") {
+      try {
+        const data = JSON.parse(buffer.trim().slice(6));
+        const content = data.choices?.[0]?.delta?.content;
+        if (content) {
+          onChunk(content);
+        }
+      } catch {
+        // Ignore final incomplete chunk
+      }
+    }
+  } finally {
+    reader.releaseLock();
   }
 
   onComplete?.(dycpStats);
