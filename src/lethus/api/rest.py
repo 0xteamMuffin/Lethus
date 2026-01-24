@@ -62,12 +62,18 @@ app.include_router(rest_router, prefix="/api", tags=["REST API"])
 
 @app.get("/")
 async def root():
-    """Health check"""
+    """Root endpoint"""
     return {
         "status": "healthy",
         "service": "Lethus Proxy",
         "version": "0.1.0"
     }
+
+
+@app.get("/health")
+async def health():
+    """Health check endpoint for container orchestration"""
+    return {"status": "healthy"}
 
 
 def main():

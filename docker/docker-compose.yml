@@ -1,7 +1,10 @@
-﻿services:
+﻿# Lethus Infrastructure Services - LOCAL DEVELOPMENT ONLY
+# For production deployment, use the root docker-compose.yml or docker-compose.prod.yml
+
+services:
   postgres:
     container_name: lethus-postgres
-    image: postgres:latest
+    image: postgres:16-alpine
     environment:
       POSTGRES_DB: lethus_db
       POSTGRES_USER: postgres
@@ -9,7 +12,7 @@
     ports:
       - "5432:5432"
     volumes:
-      - ${DOCKER_VOLUME_DIRECTORY:-.}/volumes/postgres:/var/lib/postgresql
+      - ${DOCKER_VOLUME_DIRECTORY:-.}/volumes/postgres/data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d lethus_db"]
       interval: 30s
