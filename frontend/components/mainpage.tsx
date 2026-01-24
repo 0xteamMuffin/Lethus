@@ -99,9 +99,8 @@ const LibreChatInterface: React.FC<LibreChatInterfaceProps> = ({
     if (propConversationId !== conversationId) {
       setConversationId(propConversationId);
       if (propConversationId) {
-        loadConversationHistory(propConversationId);
-        // Load conversation metadata including enhanced_mode
-        loadConversationMetadata(propConversationId);
+        // Load both metadata and history together
+        loadConversationData(propConversationId);
       } else {
         // New conversation - reset state, use localStorage preference
         setMessages([]);
@@ -114,35 +113,33 @@ const LibreChatInterface: React.FC<LibreChatInterfaceProps> = ({
     }
   }, [propConversationId]);
 
-  // Load conversation metadata (enhanced_mode) and DYCP stats from backend
-  const loadConversationMetadata = async (convId: number) => {
+  // Load conversation metadata and history together
+  const loadConversationData = async (convId: number) => {
     try {
-      const conv = await getConversation(convId);
+      setIsLoadingHistory(true);
+      
+      // Load metadata and history in parallel
+      const [conv, turns] = await Promise.all([
+        getConversation(convId),
+        getConversationTurns(convId)
+      ]);
+      
+      // Set metadata
       setEnhancedMode(conv.enhanced_mode);
-      // Lock toggle if enhanced mode is already on (can't turn off)
       setEnhancedModeLocked(conv.enhanced_mode);
       
-      // Load DYCP stats from backend
+      // Set DYCP stats
       if (conv.last_dycp_stats) {
         setLastDycpStats(conv.last_dycp_stats);
       } else {
         setLastDycpStats(null);
       }
-    } catch (error) {
-      console.error("Failed to load conversation metadata:", error);
-    }
-  };
-
-  // Load conversation history
-  const loadConversationHistory = async (convId: number) => {
-    try {
-      setIsLoadingHistory(true);
-      const turns = await getConversationTurns(convId);
-
+      
+      // Build messages with stats attached to last AI message
       const loadedMessages: Message[] = [];
       const loadedChatHistory: APIChatMessage[] = [];
 
-      turns.forEach((turn: Turn) => {
+      turns.forEach((turn: Turn, index: number) => {
         loadedMessages.push({
           id: `${turn.id}-user`,
           content: turn.user_message,
@@ -152,6 +149,9 @@ const LibreChatInterface: React.FC<LibreChatInterfaceProps> = ({
             minute: "2-digit",
           }),
         });
+        
+        // Attach DYCP stats to the last AI message
+        const isLastTurn = index === turns.length - 1;
         loadedMessages.push({
           id: `${turn.id}-ai`,
           content: turn.assistant_message,
@@ -160,6 +160,7 @@ const LibreChatInterface: React.FC<LibreChatInterfaceProps> = ({
             hour: "2-digit",
             minute: "2-digit",
           }),
+          dycpStats: isLastTurn && conv.last_dycp_stats ? conv.last_dycp_stats : undefined,
         });
 
         loadedChatHistory.push({ role: "user", content: turn.user_message });
@@ -172,8 +173,8 @@ const LibreChatInterface: React.FC<LibreChatInterfaceProps> = ({
       setMessages(loadedMessages);
       setChatHistory(loadedChatHistory);
     } catch (error) {
-      console.error("Failed to load conversation history:", error);
-      toast.error("Failed to load conversation history");
+      console.error("Failed to load conversation data:", error);
+      toast.error("Failed to load conversation");
     } finally {
       setIsLoadingHistory(false);
     }
