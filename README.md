@@ -6,7 +6,7 @@ Lethus implements DYCP (Dynamic Context Pruning) from the research paper ["Dynam
 
 ## What It Does
 
-Lethus gives LLMs perfect memory over unlimited conversation history. Instead of feeding the entire chat log (slow, expensive, lossy), it uses Kadane's Algorithm to dynamically select only the relevant conversation segments for each query.
+Lethus is an **OpenAI-compatible proxy** that gives any LLM perfect memory over unlimited conversation history. Instead of feeding the entire chat log (slow, expensive, lossy), it uses Kadane's Algorithm to dynamically select only the relevant conversation segments for each query.
 
 ```
 User: "What was that API key you mentioned earlier?"
@@ -22,8 +22,8 @@ Lethus approach:     Retrieve 3 relevant spans in 0.9s with 83%+ accuracy
 | **DYCP Algorithm** | Kadane's Algorithm for optimal span selection (tau=0.6, theta=1.0) |
 | **Semantic Decay** | Older messages need higher relevance to be recalled (lambda=0.98) |
 | **Ghost Graph** | Entity linking for pronoun resolution ("it", "that config", "the API") |
-| **Prefetch Cache** | Predictive caching for follow-up queries |
-| **Dual Interface** | MCP server for Claude/LLM integration + REST API for web apps |
+| **OpenAI-Compatible** | Drop-in replacement for any OpenAI client - just change base_url |
+| **Context Reduction** | Reduces context by 5x while improving answer quality |
 
 ## Performance (from paper)
 
@@ -37,7 +37,13 @@ Lethus approach:     Retrieve 3 relevant spans in 0.9s with 83%+ accuracy
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                         Lethus Core                              │
+│  Any OpenAI-Compatible Client                                    │
+│  (Cursor, Copilot, Claude Code, custom apps)                     │
+│  base_url = "http://localhost:8000/v1"                           │
+└─────────────────────────────────────────────────────────────────┘
+                              ↓
+┌─────────────────────────────────────────────────────────────────┐
+│                         Lethus Proxy                             │
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                  │
 │  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐       │
@@ -47,16 +53,19 @@ Lethus approach:     Retrieve 3 relevant spans in 0.9s with 83%+ accuracy
 │         │                   │                   │                │
 │         v                   v                   v                │
 │  ┌──────────────────────────────────────────────────────┐       │
-│  │              Semantic Decay + Prefetch               │       │
+│  │         Context Reduction + Semantic Decay           │       │
 │  └──────────────────────────────────────────────────────┘       │
 │                              │                                   │
 ├──────────────────────────────┴──────────────────────────────────┤
 │                                                                  │
-│  ┌────────────────────┐          ┌────────────────────┐         │
-│  │    MCP Server      │          │     REST API       │         │
-│  │  (Claude/LLMs)     │          │   (Web Apps)       │         │
-│  └────────────────────┘          └────────────────────┘         │
+│  ┌────────────────────────────────────────────────────────┐     │
+│  │  POST /v1/chat/completions  (OpenAI-compatible proxy)  │     │
+│  └────────────────────────────────────────────────────────┘     │
 │                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+                              ↓
+┌─────────────────────────────────────────────────────────────────┐
+│                    Real LLM API (OpenAI)                         │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -66,7 +75,7 @@ Lethus approach:     Retrieve 3 relevant spans in 0.9s with 83%+ accuracy
 
 - Python 3.10+
 - Docker & Docker Compose
-- OpenAI API key (for embeddings)
+- OpenAI API key
 
 ### 1. Start Infrastructure
 
@@ -106,88 +115,45 @@ cp .env.example .env
 ### 4. Run
 
 ```bash
-# MCP Server (for Claude Desktop / LLM integration)
-lethus --mode=mcp
-
-# REST API (for web applications)
-lethus --mode=api
-
-# Both
-lethus --mode=both
+lethus
 ```
 
-## MCP Integration (Claude Desktop)
+This starts the proxy on `http://localhost:8000`.
 
-Add to your Claude Desktop config (`claude_desktop_config.json`):
+## Usage
 
-```json
-{
-  "mcpServers": {
-    "lethus": {
-      "command": "lethus",
-      "args": ["--mode=mcp"]
-    }
-  }
-}
+### With Any OpenAI Client
+
+```python
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:8000/v1",  # Lethus proxy
+    api_key="your-openai-key"              # Passed through to OpenAI
+)
+
+# Use exactly like normal OpenAI API
+# Lethus automatically reduces context using DYCP
+response = client.chat.completions.create(
+    model="gpt-4o-mini",
+    messages=[...long conversation history...],
+    stream=True  # Streaming supported
+)
 ```
 
-Available MCP tools:
-- `store_interaction` - Store user/assistant messages
-- `get_context` - Retrieve relevant context using DYCP
-- `search_by_entity` - Find memories mentioning specific entities
-- `get_entity_graph` - View Ghost Graph state
-- `get_memory_stats` - Memory system statistics
-- `clear_memory` - Wipe all memory
+### With Cursor/Copilot/Claude Code
 
-## REST API
+Just set the API base URL to `http://localhost:8000/v1` in your tool's settings.
 
-### Send Message
-
-```bash
-curl -X POST http://localhost:8000/api/chat \
-  -H "Content-Type: application/json" \
-  -d '{
-    "user_id": "user123",
-    "message": "What did we discuss about the API?",
-    "openai_api_key": "sk-..."
-  }'
-```
-
-### Response
-
-```json
-{
-  "conversation_id": 1,
-  "turn_id": 42,
-  "message": "Based on our previous discussions...",
-  "retrieved_context": {
-    "spans": [
-      {
-        "start_index": 15,
-        "end_index": 18,
-        "relevance_score": 0.87
-      }
-    ],
-    "confidence": {
-      "confident": true,
-      "score": 0.85
-    }
-  }
-}
-```
-
-### API Endpoints
+## API (OpenAI-Compatible Proxy)
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/api/chat` | POST | Send message, get memory-enhanced response |
-| `/api/conversations` | POST | Create conversation |
-| `/api/conversations/{id}` | GET | Get conversation details |
-| `/api/conversations/{id}/turns` | GET | Get conversation history |
-| `/api/conversations/{id}` | DELETE | Delete conversation |
-| `/api/stats` | GET | Memory system statistics |
+| `/v1/chat/completions` | POST | Chat completions with DYCP context reduction |
+| `/v1/models` | GET | List available models |
+| `/v1/models/{model_id}` | GET | Get model details |
 
-Full docs: http://localhost:8000/docs
+Full OpenAI API compatibility - use any OpenAI SDK or client.
 
 ## Configuration
 
@@ -201,7 +167,7 @@ LETHUS_DECAY_LAMBDA=0.98         # Semantic decay rate (2% per turn)
 
 # Ghost Graph
 LETHUS_USE_SPACY=true            # Enable spaCy NER
-LETHUS_GHOST_GRAPH_BOOST=1.2     # Entity linking boost factor
+LETHUS_GHOST_GRAPH_BOOST=1.5     # Entity linking boost factor
 
 # Embeddings
 LETHUS_EMBEDDING_PROVIDER=openai # "openai" or "local"
@@ -220,7 +186,7 @@ lethus/
 │   ├── main.py              # Entry point with CLI
 │   ├── config.py            # Pydantic settings
 │   ├── api/
-│   │   ├── mcp.py           # MCP server (FastMCP)
+│   │   ├── proxy.py         # OpenAI-compatible proxy
 │   │   ├── rest.py          # FastAPI REST endpoints
 │   │   └── models.py        # Pydantic models
 │   ├── core/
@@ -271,7 +237,7 @@ entities = ["API_KEY", "config", "John"]
 # Boost turns containing linked entities
 for turn in turns:
     if has_linked_entity(turn, entities):
-        similarity *= ghost_graph_boost  # 1.2x
+        similarity *= ghost_graph_boost  # 1.5x
 ```
 
 ## Development

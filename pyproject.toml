@@ -1,8 +1,8 @@
 [project]
 name = "lethus"
 version = "0.1.0"
-description = "Lethus - DYCP Memory System with MCP Server + REST API, featuring Kadane's Algorithm, Semantic Decay, and Ghost Graph"
-source .venv/Scripts/activatereadme = "README.md"
+description = "Lethus - DYCP Context Reduction Proxy with Kadane's Algorithm, Semantic Decay, and Ghost Graph"
+readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
     # Core
@@ -26,8 +26,8 @@ dependencies = [
     # Entity Extraction (run: python -m spacy download en_core_web_sm)
     "spacy>=3.7.0",
     
-    # MCP Server
-    "mcp[cli]>=1.0.0",
+    # HTTP Client (for proxy)
+    "httpx>=0.26.0",
     
     # REST API
     "fastapi>=0.109.0",
@@ -49,8 +49,6 @@ dev = [
 
 [project.scripts]
 lethus = "lethus.main:main"
-lethus-mcp = "lethus.api.mcp:main"
-lethus-api = "lethus.api.rest:main"
 
 [build-system]
 requires = ["hatchling"]

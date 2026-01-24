@@ -1,100 +1,50 @@
 """
-Pydantic models for REST API requests and responses.
+Pydantic models for OpenAI-compatible proxy.
 """
-from pydantic import BaseModel, Field
-from typing import List, Optional, Dict, Any
-from datetime import datetime
+from pydantic import BaseModel
+from typing import List, Optional
 
 
-# === Request Models ===
-
-class MessageRequest(BaseModel):
-    """Request for sending a message"""
-    conversation_id: Optional[int] = None
-    user_id: str
-    message: str
-    openai_api_key: Optional[str] = None  # Optional per-request API key
-
-
-class ConversationCreate(BaseModel):
-    """Create a new conversation"""
-    user_id: str
-    title: Optional[str] = "New Conversation"
-
-
-# === Response Models ===
-
-class ConversationResponse(BaseModel):
-    """Conversation details"""
-    id: int
-    user_id: str
-    title: str
-    created_at: datetime
-    updated_at: datetime
-    
-    class Config:
-        from_attributes = True
-
-
-class TurnResponse(BaseModel):
-    """Turn details"""
-    id: int
-    conversation_id: int
-    turn_number: int
-    user_message: str
-    assistant_message: str
-    timestamp: datetime
-    importance_score: float
-    is_pinned: bool
-    
-    class Config:
-        from_attributes = True
-
-
-class MemorySpan(BaseModel):
-    """A span of conversation memory"""
-    start_index: int
-    end_index: int
-    turns: List[Dict[str, Any]]
-    relevance_score: float
-
-
-class ClassifiedMemory(BaseModel):
-    """A classified memory item"""
+class ChatMessage(BaseModel):
+    """OpenAI chat message format"""
+    role: str
     content: str
-    relevance: float = 1.0
-    role: Optional[str] = None
-    span_label: Optional[str] = None
+    name: Optional[str] = None
 
 
-class ClassifiedMemories(BaseModel):
-    """Structured memory categories"""
-    rules: List[ClassifiedMemory] = []      # User preferences, constraints
-    facts: List[ClassifiedMemory] = []      # Stated information
-    experiences: List[ClassifiedMemory] = [] # Past interactions
-    entities: List[Dict[str, str]] = []     # Named entities
+class ChatCompletionRequest(BaseModel):
+    """OpenAI chat completion request"""
+    model: str
+    messages: List[ChatMessage]
+    temperature: Optional[float] = 0.7
+    max_tokens: Optional[int] = None
+    stream: Optional[bool] = False
+    top_p: Optional[float] = 1.0
+    frequency_penalty: Optional[float] = 0.0
+    presence_penalty: Optional[float] = 0.0
+    stop: Optional[List[str]] = None
+    user: Optional[str] = None
 
 
-class RetrievalResult(BaseModel):
-    """Result from memory retrieval"""
-    pinned_memories: List[Dict[str, Any]]
-    spans: List[MemorySpan]
-    confidence: Dict[str, Any]
-    classified: Optional[ClassifiedMemories] = None  # Structured memory types
+class ChatCompletionChoice(BaseModel):
+    """OpenAI chat completion choice"""
+    index: int
+    message: ChatMessage
+    finish_reason: str
 
 
-class MessageResponse(BaseModel):
-    """Response from the assistant"""
-    conversation_id: int
-    turn_id: int
-    message: str
-    retrieved_context: Dict[str, Any]
-    metadata: Dict[str, Any]
+class ChatCompletionUsage(BaseModel):
+    """OpenAI token usage"""
+    prompt_tokens: int
+    completion_tokens: int
+    total_tokens: int
 
 
-class MemoryStats(BaseModel):
-    """Memory system statistics"""
-    total_turns: int
-    tracked_entities: int
-    cache_size: int
-    decay_lambda: float
+class ChatCompletionResponse(BaseModel):
+    """OpenAI chat completion response"""
+    id: str
+    object: str = "chat.completion"
+    created: int
+    model: str
+    choices: List[ChatCompletionChoice]
+    usage: ChatCompletionUsage

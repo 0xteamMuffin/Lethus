@@ -1,6 +1,6 @@
 """
 Lethus configuration.
-Supports both MCP and REST API modes.
+OpenAI-compatible proxy with DYCP context reduction.
 """
 import os
 from pathlib import Path
@@ -13,9 +13,6 @@ _ENV_FILE = _PROJECT_ROOT / ".env"
 
 
 class Settings(BaseSettings):
-    # === Mode ===
-    mode: Literal["mcp", "api", "both"] = "both"
-    
     # === API Configuration ===
     api_host: str = "0.0.0.0"
     api_port: int = 8000
