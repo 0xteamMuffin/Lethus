@@ -1,49 +1,53 @@
 """
-Ghost Graph: Lightweight entity extraction and linking for pronoun resolution.
-Extracts entities from conversation turns and enables entity-based retrieval.
+Ghost Graph: Entity extraction and linking for pronoun resolution.
+Solves the "pronoun problem" by tracking entity relationships across turns.
 """
 import json
 import re
 from typing import List, Dict, Set, Optional
 from dataclasses import dataclass, field
 
+from ..config import settings
+
+
 @dataclass
 class Entity:
+    """Represents an entity in the Ghost Graph"""
     name: str
-    entity_type: str  # PERSON, ORG, CODE, TECH, etc.
+    entity_type: str  # PERSON, ORG, CONFIG, FUNCTION, URL, etc.
     aliases: Set[str] = field(default_factory=set)
     linked_entities: Set[str] = field(default_factory=set)
+
 
 class GhostGraph:
     """
     Lightweight in-memory entity graph for context anchoring.
-    Solves the "pronoun problem" by tracking entity relationships.
+    Enables entity-based retrieval and pronoun resolution.
     """
     
-    def __init__(self, use_spacy: bool = True):
+    # Technical patterns for code/config extraction
+    TECH_PATTERNS = [
+        (r'\b[A-Z][A-Z0-9_]{2,}\b', 'CONFIG'),  # ENV_VAR, API_KEY
+        (r'\b[a-z_][a-z0-9_]*\([^)]*\)', 'FUNCTION'),  # function_name()
+        (r'https?://[^\s]+', 'URL'),
+        (r'\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b', 'IP'),
+        (r'[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+', 'EMAIL'),
+    ]
+    
+    def __init__(self, use_spacy: bool = None):
         """
         Args:
-            use_spacy: If True, use spaCy for NER. If False, use regex patterns.
+            use_spacy: If True, use spaCy for NER. If False, use regex patterns only.
         """
         self.entities: Dict[str, Entity] = {}
-        self.use_spacy = use_spacy
+        self.use_spacy = use_spacy if use_spacy is not None else settings.use_spacy
         self._nlp = None
-        
-        # Technical patterns for code/config extraction
-        self.tech_patterns = [
-            (r'\b[A-Z][A-Z0-9_]{2,}\b', 'CONFIG'),  # ENV_VAR, API_KEY
-            (r'\b[a-z_][a-z0-9_]*\([^)]*\)', 'FUNCTION'),  # function_name()
-            (r'https?://[^\s]+', 'URL'),
-            (r'\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b', 'IP'),
-            (r'[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+', 'EMAIL'),
-        ]
     
     def _get_nlp(self):
         """Lazy load spaCy model."""
         if self._nlp is None and self.use_spacy:
             try:
                 import spacy
-                # Use small model for speed
                 self._nlp = spacy.load("en_core_web_sm")
             except (ImportError, OSError):
                 print("Warning: spaCy not available, falling back to regex extraction")
@@ -52,7 +56,7 @@ class GhostGraph:
     
     def extract_entities(self, text: str) -> List[Dict[str, str]]:
         """
-        Extract entities from text using spaCy NER or regex fallback.
+        Extract entities from text using spaCy NER and regex patterns.
         
         Returns:
             List of {"name": str, "type": str}
@@ -60,7 +64,7 @@ class GhostGraph:
         entities = []
         
         # Always run tech patterns (code-specific)
-        for pattern, etype in self.tech_patterns:
+        for pattern, etype in self.TECH_PATTERNS:
             matches = re.findall(pattern, text)
             for match in matches:
                 entities.append({"name": match, "type": etype})
@@ -71,7 +75,6 @@ class GhostGraph:
             if nlp:
                 doc = nlp(text)
                 for ent in doc.ents:
-                    # Filter to important types
                     if ent.label_ in ["PERSON", "ORG", "GPE", "PRODUCT", "WORK_OF_ART", "EVENT"]:
                         entities.append({"name": ent.text, "type": ent.label_})
         
@@ -86,9 +89,13 @@ class GhostGraph:
         
         return unique
     
-    def register_entities(self, entities: List[Dict[str, str]], context_entities: Optional[List[str]] = None):
+    def register_entities(
+        self,
+        entities: List[Dict[str, str]],
+        context_entities: Optional[List[str]] = None
+    ):
         """
-        Add entities to the graph and link them if they appear in the same context.
+        Add entities to the graph and link co-occurring entities.
         
         Args:
             entities: List of extracted entities
@@ -109,7 +116,7 @@ class GhostGraph:
     
     def get_linked_entities(self, entity_name: str, depth: int = 1) -> Set[str]:
         """
-        Get entities linked to the given entity (traverses the graph).
+        Get entities linked to the given entity (graph traversal).
         
         Args:
             entity_name: Starting entity
@@ -128,7 +135,7 @@ class GhostGraph:
                     linked = self.entities[name].linked_entities
                     next_level.update(linked)
                     result.update(linked)
-            current_level = next_level - result  # Don't revisit
+            current_level = next_level - result
         
         return result
     
@@ -145,6 +152,57 @@ class GhostGraph:
                 mentions.append(name)
         
         return mentions
+    
+    def boost_similarities(
+        self,
+        query: str,
+        turns: List[dict],
+        similarities: "np.ndarray",
+        boost_factor: float = None
+    ) -> "np.ndarray":
+        """
+        Boost similarity scores for turns containing entities linked to query entities.
+        
+        Args:
+            query: The query text
+            turns: List of turn dictionaries with 'entities' field
+            similarities: Original similarity scores
+            boost_factor: Multiplicative boost (default from config)
+            
+        Returns:
+            Boosted similarity scores
+        """
+        import numpy as np
+        import json as json_module
+        
+        boost = boost_factor or settings.ghost_graph_boost
+        
+        mentioned_entities = self.find_entity_mentions(query)
+        if not mentioned_entities:
+            return similarities
+        
+        boosted = similarities.copy()
+        
+        for entity in mentioned_entities:
+            linked = self.get_linked_entities(entity, depth=1)
+            for i, turn in enumerate(turns):
+                turn_entities_raw = turn.get("entities", "[]")
+                if isinstance(turn_entities_raw, str):
+                    turn_entities = json_module.loads(turn_entities_raw)
+                else:
+                    turn_entities = turn_entities_raw
+                
+                turn_entity_names = [
+                    e["name"] if isinstance(e, dict) else e 
+                    for e in turn_entities
+                ]
+                
+                for linked_ent in linked:
+                    if linked_ent in turn_entity_names:
+                        boosted[i] *= boost
+                        break
+        
+        return boosted
     
     def to_json(self) -> str:
         """Serialize graph for storage."""
@@ -167,3 +225,23 @@ class GhostGraph:
                 aliases=set(info.get("aliases", [])),
                 linked_entities=set(info.get("links", []))
             )
+    
+    def clear(self):
+        """Clear all entities from the graph."""
+        self.entities.clear()
+    
+    def get_state_summary(self, limit: int = 20) -> str:
+        """Get a human-readable summary of the graph state."""
+        if not self.entities:
+            return "Ghost Graph is empty. No entities tracked yet."
+        
+        lines = ["--- GHOST GRAPH STATE ---"]
+        for name, entity in list(self.entities.items())[:limit]:
+            links = list(entity.linked_entities)[:5]
+            lines.append(f"  {name} ({entity.entity_type}) -> {links}")
+        
+        if len(self.entities) > limit:
+            lines.append(f"  ... and {len(self.entities) - limit} more entities")
+        
+        lines.append("--- END GRAPH ---")
+        return "\n".join(lines)
