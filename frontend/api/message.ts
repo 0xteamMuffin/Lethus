@@ -62,6 +62,7 @@ export interface Conversation {
   user_id: string;
   title: string;
   enhanced_mode: boolean;
+  last_dycp_stats?: DYCPStats | null;
   created_at: string;
   updated_at: string;
 }
@@ -333,7 +334,7 @@ export async function createConversation(userId: string, title?: string, enhance
   });
 }
 
-export async function updateConversation(conversationId: number, updates: { title?: string; enhanced_mode?: boolean }): Promise<Conversation> {
+export async function updateConversation(conversationId: number, updates: { title?: string; enhanced_mode?: boolean; last_dycp_stats?: DYCPStats | null }): Promise<Conversation> {
   return apiFetch(`/api/conversations/${conversationId}`, {
     method: "PATCH",
     body: JSON.stringify(updates),

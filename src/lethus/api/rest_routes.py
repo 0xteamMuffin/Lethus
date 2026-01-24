@@ -82,6 +82,7 @@ class ConversationResponse(BaseModel):
     user_id: str
     title: str
     enhanced_mode: bool
+    last_dycp_stats: Optional[Dict[str, Any]] = None
     created_at: datetime
     updated_at: datetime
 
@@ -89,6 +90,7 @@ class ConversationResponse(BaseModel):
 class ConversationUpdateRequest(BaseModel):
     title: Optional[str] = None
     enhanced_mode: Optional[bool] = None
+    last_dycp_stats: Optional[Dict[str, Any]] = None
 
 
 class TurnResponse(BaseModel):
@@ -357,26 +359,36 @@ async def create_conversation(request: ConversationRequest, db: Session = Depend
 @router.get("/conversations/user/{user_id}", response_model=List[ConversationResponse])
 async def get_user_conversations(user_id: str, db: Session = Depends(get_db)):
     """Get all conversations for a user"""
+    import json
     conversations = db.query(Conversation).filter(
         Conversation.user_id == user_id
     ).order_by(Conversation.updated_at.desc()).all()
     
-    return [
-        ConversationResponse(
+    result = []
+    for conv in conversations:
+        last_dycp_stats = None
+        if conv.ghost_graph_json:
+            try:
+                data = json.loads(conv.ghost_graph_json)
+                last_dycp_stats = data.get("last_dycp_stats")
+            except (json.JSONDecodeError, TypeError):
+                pass
+        result.append(ConversationResponse(
             id=conv.id,
             user_id=conv.user_id,
             title=conv.title,
             enhanced_mode=conv.enhanced_mode if conv.enhanced_mode is not None else True,
+            last_dycp_stats=last_dycp_stats,
             created_at=conv.created_at,
             updated_at=conv.updated_at
-        )
-        for conv in conversations
-    ]
+        ))
+    return result
 
 
 @router.get("/conversations/{conversation_id}", response_model=ConversationResponse)
 async def get_conversation(conversation_id: int, db: Session = Depends(get_db)):
     """Get a specific conversation"""
+    import json
     conversation = db.query(Conversation).filter(
         Conversation.id == conversation_id
     ).first()
@@ -384,11 +396,21 @@ async def get_conversation(conversation_id: int, db: Session = Depends(get_db)):
     if not conversation:
         raise HTTPException(status_code=404, detail="Conversation not found")
     
+    # Parse DYCP stats from ghost_graph_json (repurposed column)
+    last_dycp_stats = None
+    if conversation.ghost_graph_json:
+        try:
+            data = json.loads(conversation.ghost_graph_json)
+            last_dycp_stats = data.get("last_dycp_stats")
+        except (json.JSONDecodeError, TypeError):
+            pass
+    
     return ConversationResponse(
         id=conversation.id,
         user_id=conversation.user_id,
         title=conversation.title,
         enhanced_mode=conversation.enhanced_mode if conversation.enhanced_mode is not None else True,
+        last_dycp_stats=last_dycp_stats,
         created_at=conversation.created_at,
         updated_at=conversation.updated_at
     )
@@ -396,7 +418,8 @@ async def get_conversation(conversation_id: int, db: Session = Depends(get_db)):
 
 @router.patch("/conversations/{conversation_id}", response_model=ConversationResponse)
 async def update_conversation(conversation_id: int, request: ConversationUpdateRequest, db: Session = Depends(get_db)):
-    """Update a conversation (title or enhanced_mode). Note: enhanced_mode can only be turned ON, not OFF."""
+    """Update a conversation (title, enhanced_mode, or last_dycp_stats). Note: enhanced_mode can only be turned ON, not OFF."""
+    import json
     conversation = db.query(Conversation).filter(
         Conversation.id == conversation_id
     ).first()
@@ -411,15 +434,34 @@ async def update_conversation(conversation_id: int, request: ConversationUpdateR
     if request.enhanced_mode is True and not conversation.enhanced_mode:
         conversation.enhanced_mode = True
     
+    # Update DYCP stats (stored in ghost_graph_json column)
+    if request.last_dycp_stats is not None:
+        try:
+            existing_data = json.loads(conversation.ghost_graph_json or "{}")
+        except (json.JSONDecodeError, TypeError):
+            existing_data = {}
+        existing_data["last_dycp_stats"] = request.last_dycp_stats
+        conversation.ghost_graph_json = json.dumps(existing_data)
+    
     conversation.updated_at = datetime.utcnow()
     db.commit()
     db.refresh(conversation)
+    
+    # Parse stats for response
+    last_dycp_stats = None
+    if conversation.ghost_graph_json:
+        try:
+            data = json.loads(conversation.ghost_graph_json)
+            last_dycp_stats = data.get("last_dycp_stats")
+        except (json.JSONDecodeError, TypeError):
+            pass
     
     return ConversationResponse(
         id=conversation.id,
         user_id=conversation.user_id,
         title=conversation.title,
         enhanced_mode=conversation.enhanced_mode if conversation.enhanced_mode is not None else True,
+        last_dycp_stats=last_dycp_stats,
         created_at=conversation.created_at,
         updated_at=conversation.updated_at
     )

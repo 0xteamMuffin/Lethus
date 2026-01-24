@@ -60,7 +60,14 @@ const LibreChatInterface: React.FC<LibreChatInterfaceProps> = ({
   const [streamingMessageId, setStreamingMessageId] = useState<string | null>(
     null,
   );
-  const [enhancedMode, setEnhancedMode] = useState<boolean>(true);  // Default to enhanced
+  const [enhancedMode, setEnhancedMode] = useState<boolean>(() => {
+    // Load from localStorage or default to true
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem("lethus_enhanced_mode");
+      return saved !== null ? saved === "true" : true;
+    }
+    return true;
+  });
   const [enhancedModeLocked, setEnhancedModeLocked] = useState<boolean>(false);  // Lock after first enhanced message
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -96,22 +103,31 @@ const LibreChatInterface: React.FC<LibreChatInterfaceProps> = ({
         // Load conversation metadata including enhanced_mode
         loadConversationMetadata(propConversationId);
       } else {
-        // New conversation - reset state
+        // New conversation - reset state, use localStorage preference
         setMessages([]);
         setChatHistory([]);
-        setEnhancedMode(true);
+        setLastDycpStats(null);
+        const savedMode = localStorage.getItem("lethus_enhanced_mode");
+        setEnhancedMode(savedMode !== null ? savedMode === "true" : true);
         setEnhancedModeLocked(false);
       }
     }
   }, [propConversationId]);
 
-  // Load conversation metadata (enhanced_mode)
+  // Load conversation metadata (enhanced_mode) and DYCP stats from backend
   const loadConversationMetadata = async (convId: number) => {
     try {
       const conv = await getConversation(convId);
       setEnhancedMode(conv.enhanced_mode);
       // Lock toggle if enhanced mode is already on (can't turn off)
       setEnhancedModeLocked(conv.enhanced_mode);
+      
+      // Load DYCP stats from backend
+      if (conv.last_dycp_stats) {
+        setLastDycpStats(conv.last_dycp_stats);
+      } else {
+        setLastDycpStats(null);
+      }
     } catch (error) {
       console.error("Failed to load conversation metadata:", error);
     }
@@ -306,6 +322,11 @@ const LibreChatInterface: React.FC<LibreChatInterfaceProps> = ({
           setLastDycpStats(stats);
           responseStats = stats;
           
+          // Persist stats to backend for this conversation
+          if (currentConvId) {
+            updateConversation(currentConvId, { last_dycp_stats: stats }).catch(console.error);
+          }
+          
           // Update message with final stats
           setMessages((prev) =>
             prev.map((msg) =>
@@ -407,6 +428,8 @@ const LibreChatInterface: React.FC<LibreChatInterfaceProps> = ({
               if (!enhancedModeLocked) {
                 const newMode = !enhancedMode;
                 setEnhancedMode(newMode);
+                // Save preference to localStorage for new conversations
+                localStorage.setItem("lethus_enhanced_mode", String(newMode));
                 // Update conversation in DB if it exists
                 if (conversationId && newMode) {
                   updateConversation(conversationId, { enhanced_mode: newMode });
