@@ -1,0 +1,900 @@
+
+
+
+
+
+14
+LLM calls that take all previous turns (AT) as in-
+put when constructing memory, so their designs
+appear similar at a high level. However, their
+practical preprocessing cost differs significantly
+in our benchmarks, where the full dialogue prior
+to test queries is already available. MemoChat
+and SeCom require only a single O(1 × |AT|)
+pass over the dialogue during preprocessing. In
+contrast, CondMem constructs memory cumula-
+tively—each step reprocesses the entire dialogue
+so far, and the resulting memory is fed into the
+next step. This chain of interdependent updates
+leads to O(n×|AT|) preprocessing calls, making
+API-based evaluation infeasible; thus, we evalu-
+ate CondMem only with open-source models (see
+Section 5.6). SCM4LLMs also performs turn-level
+preprocessing but do one turn at a time, avoiding
+repeated full-history calls and remaining substan-
+tially cheaper than CondMem. Finally, DYCP per-
+forms no offline calls and is therefore highly effi-
+cient. In terms of online cost, SeCom and DYCP
+are the most efficient methods, each requiring only
+a single M+Q call per query, while others add
+memory control or retrieval calls during inference.
+Preprocess Offline Online
+CondMem Offline ×n M′+Q ×1 M′+Q ×> 1
+0 | AT ×1 M+Q ×1
+SCM4LLMs Offline ×n T ×1 Q ×1
+M+Q ×1
+(AT | M | T )+Q ×1
+MemoChat Offline ×1 AT ×1 M′+Q ×1
+M+Q ×1
+SeCom Offline ×1 AT ×1 M+Q ×1
+DYCP 0 0 M+Q ×1
+Table 3: LLM call requirements for each method.
+Preprocess indicates offline processing applied to
+a dialogue before evaluating its testable queries
+(e.g., memory construction). Offline refers to per-
+turn LLM calls used to update memory but that do
+not affect user-facing latency. Online denotes the
+per-query LLM calls executed during inference.
+We annotate each call by its input scope: AT = all
+previous turns, T = one turn, M′ = memory candi-
+dates, M = retrieved memory, Q = test query. “×1”
+denotes a single call, “× > 1” denotes more than
+one call, and “0 |(·)” indicates an optional call. n
+denotes the number of turns included in AT.
+5.2.3 Retriever
+As DYCP, SCM4LLMs, SeCom and CondMem
+include a retriever component in their frame-
+works, we experiment with four different re-
+trievers, including variants of Contriever (Izac-
+ard et al., 2021) and BGE (Chen et al., 2024),
+as presented in Table 5 (Section 5.5). We use
+. . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .facebook/contriever-msmarco7 for downstream
+answer generation across all methods, as it con-
+sistently shows the best performance. Note that
+CondMem produces and retrieves memory chunks
+that do not preserve turn boundaries, making turn-
+level gold comparison infeasible.
+5.3 Evaluation Metrics
+We evaluate context management methods using
+three metrics: Answer Quality, Response Latency,
+and Retrieval Accuracy.
+Answer Quality We adopt GPT4Score, follow-
+ing prior work (Lu et al., 2023; Pan et al., 2025;
+Yuan et al., 2025), in which GPT-4 serves as a
+judge and assigns a score from 1 to 100 based
+on how well the model response answers the user
+question. This aligns our evaluation with common
+practice and provides consistent, scalable assess-
+ments. The evaluation prompt (Figure 3) provides
+GPT-4 with the conversation history, user ques-
+tion, model response, and gold answer as input.
+EVALUATION PROMPT
+You are an impartial judge. You will be shown
+Conversation History, User Question, Gold
+Response and Bot Response.
+Conversation History:
+{{ conversation_history }}
+User Question:
+{{ current_user_question }}
+Gold Response:
+{{ gold_answer }}
+Bot Response:
+{{ model_response }}
+Please evaluate whether the Bot Response ac-
+curately answers the User Question, referenc-
+ing the appropriate information from the long
+Conversation History, and using the Gold Re-
+sponse as a reference. Begin your evaluation
+by providing a short explanation, then you must
+rate Bot Response on an integer rating of 1 to
+100 by strictly following this format: [[rating]].
+Figure 3: Evaluation prompt used in GPT4Score
+To verify that GPT4Score aligns with human judg-
+ment, we also conduct a human evaluation on a
+7 https://huggingface.co/facebook/
+contriever-msmarco
+small subset of samples (Section 5.5.2). For the
+LoCoMo benchmark, which contains short, fac-
+tual gold answers, we further report Exact Match
+(EM) and ROUGE (Lin, 2004). For EM, we con-
+sider a prediction correct if the model response
+contains the gold answer string. ROUGE is com-
+puted based on n-gram overlap between the model
+response and the gold answer. These metrics are
+omitted for other benchmarks due to the length
+and verbosity of their gold answers, which limits
+the reliability of traditional lexical matching.
+Response Latency We measure online first-
+token latency—the time from receiving the user
+utterance to generating the first token of the model
+response—to quantify the additional latency intro-
+duced by each memory management method. To
+observe when the first token is generated, we call
+all LLMs in streaming mode.
+Retrieval Accuracy We use Hit@k, Recall@k,
+and Precision@k to evaluate how accurately each
+method retrieves the context relevant to the cur-
+rent turn. As only LoCoMo benchmark provides
+ground-truth annotations of relevant context for
+each test question, we use LoCoMo for this evalu-
+ation. Each metric is defined as follows:
+• Hit@k indicates whether any gold context
+appears in the top-k results.
+• Recall@k is the proportion of gold contexts
+covered by the top-k results.
+• Precision@k is the proportion of the top-k
+results that include gold context.
+5.4 Experimental Details
+For the implementation of DYCP, we set the gain
+threshold τ to 0.6 and the stopping threshold θ
+to 1.0 as hyperparameters of the KadaneDial.
+These values were chosen based on preliminary
+qualitative inspection of retrieved context spans
+and were found to produce stable pruning behav-
+ior. Because the relevance scores are z-score nor-
+malized before span selection, the thresholds op-
+erate on a standardized scale. As a result, DYCP
+is not overly sensitive to the specific numerical
+choices of τ and θ, and we therefore use the same
+configuration across all datasets.
+To ensure a fair comparison in retrieval-based
+baselines, we match the total number of retrieved
+turns across methods wherever applicable. For
+segment-level approaches such as SeCom, we
+align their retrieval volume with that of DYCP by
+matching the product of TpS and RS reported in
+Table 8. Concretely, this corresponds to retriev-
+ing the top 5 turns on LoCoMo, 2 on SCM4LLMs,
+and 3 on MT-Bench+. MemoChat performs au-
+tomatic segment retrieval and therefore does not
+require specifying a fixed k. For turn-level re-
+trievers such as SCM4LLMs and CondMem, we
+follow the original papers and use k=5 and k=3,
+respectively, for all benchmarks. In all methods,
+retrieved items are reordered chronologically (i.e.,
+according to their original dialogue order) before
+being provided to the conversational agent.
+All experiments with API-based LLMs were
+conducted using a single NVIDIA RTX A6000
+GPU to run retriever, while experiments involv-
+ing open-source LLMs were run locally on four
+NVIDIA RTX A6000 GPUs.
+5.5 Result
+5.5.1 Answer Quality & Response Latency
+We evaluate our method on three long-form
+benchmarks using five conversational agents, in-
+cluding two standard models (GPT-4o, Claude
+3.7), a lightweight variant (GPT-4o mini), and two
+recently released models (GPT-4.1, Claude 4.0).
+As shown in Table 4, DYCP consistently
+achieves the highest answer quality across bench-
+marks and conversational agents, while maintain-
+ing low response latency. Overall, performance
+generally follows the order: DYCP > Full Con-
+text > SeCom > SCM4LLMs > MemoChat, with
+both DYCP and SeCom distinguished by their low
+latency. Note that, as discussed in Section 5.2.1,
+prior studies used short-context LLMs (e.g., 4k-
+token models), where the Full Context baseline
+might have required truncation. In contrast, our
+setting uses long-context LLMs that can ingest the
+entire dialogue history, which naturally shifts the
+relative performance of the baselines.
+The latency advantages of DYCP directly fol-
+low from the computational cost analysis in Sec-
+tion 5.2.2. Unlike other methods that introduce
+additional LLM calls during memory construc-
+tion, control, or retrieval refinement, DYCP per-
+forms no extra LLM calls—neither offline nor
+at query time. This eliminates the overhead of
+repeatedly reprocessing the dialogue and avoids
+the variance introduced by multi-stage pipelines.
+Consequently, the low and stable latency observed
+across all agents reflects a structural property of
+the method: DYCP both minimizes the number of
+LLM calls and reduces the size of each call’s in-
+LoCoMo MT-Bench+ SCM4LLMs
+Agent Method EM R-1 R-2 R-L Quality Latency (↓) Quality Latency (↓) Quality Latency (↓)
+GPT
+4o
+No Context 1.79 2.73 0.33 2.36 15.57 (±16.1) 0.48 (±0.2) 66.04 (±27.2) 0.60 (±0.3) 58.47 (±34.2) 0.45 (±0.1)
+Full Context 24.23 12.28 5.16 11.28 75.13 (±32.9) 2.32 (±0.9) 88.03 (±17.6) 1.56 (±1.6) 85.51 (±18.9) 2.06 (±1.2)
+MemoChat 6.89 7.05 1.79 6.19 43.39 (±33.0) 2.24 (±0.8) 84.06 (±22.2) 5.12 (±2.8) 83.47 (±21.7) 3.52 (±1.8)
+SCM4LLMs 12.50 9.84 3.66 9.03 49.60 (±37.6) 2.01 (±0.7) 72.98 (±27.0) 3.39 (±2.0) 76.11 (±27.5) 3.43 (±2.3)
+SeCom 21.17 12.45 4.70 11.32 67.19 (±36.2) 1.26 (±0.7) 88.08 (±19.2) 0.87 (±1.0) 85.40 (±19.1) 0.79 (±0.3)
+DYCP (Ours) 26.53 14.72* 6.22* 13.51* 83.27* (±26.4) 1.10 (±0.5) 89.02 (±17.1) 0.95 (±1.0) 87.57 (±16.4) 1.03 (±0.5)
+Claude
+3.7
+No Context 0.51 2.47 0.20 2.18 13.30 (± 9.5) 1.15 (±0.8) 66.87 (±27.8) 2.12 (±1.0) 57.90 (±36.0) 1.57 (±0.7)
+Full Context 26.28 6.69 2.64 5.99 74.21 (±32.6) 5.54 (±1.5) 80.50 (±25.8) 5.49 (±3.6) 88.08 (±18.5) 6.30 (±3.6)
+MemoChat 3.83 3.58 0.58 3.08 30.15 (±30.4) 5.53 (±1.3) 85.83 (±19.8) 8.18 (±2.4) 78.49 (±29.4) 7.48 (±2.3)
+SCM4LLMs 22.19 5.80 1.86 5.25 62.82 (±35.1) 6.65 (±1.2) 76.37 (±26.1) 8.63 (±2.7) 79.56 (±26.2) 7.82 (±1.9)
+SeCom 21.17 6.04 2.11 5.38 60.88 (±37.4) 1.53 (±0.6) 87.44 (±18.7) 3.08 (±1.6) 86.32 (±18.3) 3.54 (±1.7)
+DYCP (Ours) 31.89* 7.98* 3.16* 7.08* 83.05* (±27.3) 1.52 (±0.7) 88.05 (±18.3) 2.93 (±1.7) 88.92 (±16.2) 2.52 (±1.2)
+GPT
+4o
+mini
+No Context 1.79 3.09 0.33 2.66 17.19 (±17.9) 0.48 (±0.5) 66.13 (±27.0) 0.55 (±0.3) 59.62 (±33.3) 0.53 (±0.3)
+Full Context 24.49 15.04 6.01 13.91 74.96 (±30.9) 2.43 (±1.4) 84.88 (±21.6) 1.22 (±0.9) 83.08 (±20.5) 1.63 (±1.4)
+MemoChat 9.69 7.69 2.65 6.83 45.62 (±35.1) 2.46 (±1.8) 74.39 (±26.8) 3.94 (±2.0) 78.42 (±27.6) 3.24 (±1.5)
+SCM4LLMs 19.13 13.64 5.40 12.59 66.47 (±34.7) 2.10 (±0.6) 80.23 (±23.8) 4.97 (±3.1) 84.38 (±18.5) 4.22 (±3.0)
+SeCom 19.64 12.01 4.50 10.97 66.09 (±34.9) 0.88 (±0.5) 86.52 (±20.0) 0.77 (±1.0) 83.09 (±22.1) 0.74 (±0.2)
+DYCP (Ours) 28.32 16.12 6.69 14.79 80.44* (±28.5) 0.88 (±0.4) 87.24 (±19.3) 0.75 (±0.4) 84.55 (±18.1) 0.99 (±0.7)
+GPT
+4.1
+No Context 1.79 4.76 0.66 3.95 25.21 (±24.9) 0.43 (±0.3) 67.54 (±28.0) 0.46 (±0.3) 62.41 (±36.5) 0.43 (±0.1)
+Full Context 33.67 12.31 5.63 11.35 92.06 (±17.4) 2.41 (±1.7) 90.50 (±15.7) 1.63 (±1.6) 90.83 (±14.1) 1.91 (±1.3)
+DYCP (Ours) 35.46 12.45 5.91 11.56 91.46 (±18.3) 0.97 (±0.5) 90.18 (±16.4) 0.71 (±0.7) 91.08 (±14.6) 0.77 (±0.3)
+Claude
+4.0
+No Context 0.77 2.83 0.21 2.46 13.30 (± 9.5) 1.15 (±0.8) 66.87 (±27.8) 2.12 (±1.0) 57.89 (±36.0) 1.57 (±0.7)
+Full Context 34.69 6.89 2.98 6.24 89.57 (±19.9) 5.30 (±1.7) 85.71 (±20.4) 2.97 (±0.7) 84.89 (±22.0) 3.25 (±0.7)
+DYCP (Ours) 37.24* 7.48 3.41 6.83 90.45 (±19.2) 1.85 (±0.5) 88.39* (±17.5) 1.55 (±0.4) 88.19 (±16.0) 1.79 (±0.5)
+Table 4: Evaluation of answer quality (↑) and response latency (↓) on three long-form dialogue bench-
+marks: LoCoMo, MT-Bench+, and SCM4LLMs, using five conversational agents (GPT-4o, Claude
+3.7, GPT-4o mini, GPT-4.1, and Claude 4.0). We primarily use GPT4Score as the quality metric. For
+LoCoMo, which features short, factual gold answers, we also report lexical-based quality metrics such
+as Exact Match (EM) and ROUGE-1/2/L, as they provide a reliable signal of answer quality in this set-
+ting. The best score per experimental unit is bolded, and the second-best is underlined. We also perform
+paired t-tests between these top two methods to assess whether the best scores are statistically signifi-
+cantly higher than the second-best scores: * for p < 0.01, * for p < 0.05 and * for p < 0.1. Latency is
+reported in seconds, with darker cells indicating higher latency: High Medium Low (preferred).
+Figure 4: Comparison of response latency and answer quality across benchmarks using GPT-4o. The x-
+axis indicates first-token latency in seconds (lower is better), and the y-axis shows answer quality (higher
+is better). Since quality scores are on different scales across benchmarks, they are normalized as z-scores
+within each benchmark. DYCP achieves both high quality and low latency across all datasets.
+put, enabling efficient inference even for dialogues
+with hundreds of turns.
+Figure 4 further illustrates the quality–latency
+trade-off: our method dominates the upper left
+quadrant, achieving both high quality and low la-
+tency. The performance gap is particularly pro-
+nounced on LoCoMo, the longest conversations
+in terms of turns, highlighting its strength in han-
+dling extended dialogue history. The novelty of
+our method lies in how it departs from the exist-
+ing segmentation and retrieval paradigms. Rather
+than relying on pre-segmentation or fixed top-k re-
+trieval, DYCP dynamically identifies the context
+needed for the current turn in a single pass. This
+enables flexible, structure-aware context selection
+that captures coherent discourse units. We provide
+a more detailed discussion in Section 5.5.3.
+For the smaller GPT-4o mini model, perfor-
+Method Retriever H@1 H@3 H@5 H R@1 R@3 R@5 R P@1 P@3 P@5 P
+SCM4LLMs
+facebook/contriever 0.3529 0.5473 0.6650 0.7647 0.3005 0.4779 0.5831 0.6839 0.3529 0.1969 0.1473 0.0908
+facebook/contriever-msmarco 0.4194 0.6445 0.7187 0.8005 0.3663 0.5708 0.6380 0.7176 0.4194 0.2344 0.1621 0.0939
+BAAI/bge-base-en 0.3708 0.6087 0.6829 0.7494 0.3168 0.5319 0.5983 0.6693 0.3708 0.2234 0.1540 0.0900
+BAAI/bge-base-en-v1.5 0.3836 0.6292 0.6880 0.7801 0.3311 0.5502 0.6056 0.6952 0.3836 0.2285 0.1575 0.0928
+SeCom
+facebook/contriever 0.2916 0.5192 0.6650 0.8414 0.2439 0.4344 0.5805 0.7825 0.2916 0.1876 0.1524 0.1066
+facebook/contriever-msmarco 0.3325 0.5601 0.6726 0.8542 0.2788 0.4822 0.5886 0.7977 0.3325 0.2046 0.1540 0.1097
+BAAI/bge-base-en 0.2737 0.5320 0.6471 0.8389 0.2090 0.4520 0.5708 0.7844 0.2737 0.1969 0.1499 0.1079
+BAAI/bge-base-en-v1.5 0.3171 0.5550 0.6675 0.8261 0.2548 0.4737 0.5846 0.7732 0.3171 0.2038 0.1535 0.1066
+DYCP (Ours)
+facebook/contriever 0.5115 0.7903 0.8670 0.9488 0.4613 0.7143 0.7995 0.8985 0.5115 0.2847 0.1969 0.1031
+facebook/contriever-msmarco 0.5320 0.7954 0.8849 0.9565 0.4803 0.7263 0.8179 0.9088 0.5320 0.2907 0.2005 0.0992
+BAAI/bge-base-en 0.4885 0.7263 0.8465 0.9309 0.4248 0.6591 0.7710 0.8858 0.4885 0.2634 0.1893 0.0929
+BAAI/bge-base-en-v1.5 0.5243 0.7724 0.8619 0.9540 0.4594 0.6969 0.7912 0.9079 0.5243 0.2788 0.1939 0.0966
+Table 5: Retrieval performance on the LoCoMo benchmark using three retriever-based methods
+(SCM4LLMs, SeCom, and DYCP with four retrievers. We report Hit@k (H@k), Recall@k (R@k),
+and Precision@k (P@k) for k = 1,3,5, along with metrics computed over the full set of retrieved results
+by each method (denoted as H, R, P). For DYCP, the number of retrieved results is determined by the
+method (refer to Table 8), whereas for SCM4LLMs and SeCom, the top-k is fixed to 10.
+mance decreases proportionally while latency is
+reduced compared to GPT-4o, though the over-
+all trend remains consistent. For the most recent
+models, GPT-4.1 and Claude 4.0, we observe im-
+proved long-context understanding relative to their
+previous versions. In particular, GPT-4.1 shows a
+substantial gain over GPT-4o: on LoCoMo, EM
+increases from 24.23 to 33.67 and GPT4Score
+rises from 75.13 to 92.06. Under GPT-4.1, the
+Full Context condition even achieves performance
+comparable to that of DYCP, and although it at-
+tains slightly higher scores in some cases, none
+of these differences are statistically significant.
+Meanwhile, DYCP runs more than twice as fast
+(0.97s vs. 2.41s) and requires far fewer input to-
+kens (Table 6). These findings highlight that al-
+though LLMs are improving in long-context un-
+derstanding and now support million-token inputs,
+feeding the entire context remains inefficient.
+LoCoMo MT-Bench+ SCM4LLMs
+Full Context 25,750 20,364 24,006
+DYCP (Ours) 4,982 2,698 4,042
+Table 6: Average number of input context tokens
+prepended to the current user question for Full
+Context and DYCP across benchmarks.
+5.5.2 Human Evaluation
+To validate whether GPT4Score aligns with hu-
+man judgments, one of the authors conducted
+a separate evaluation on one LoCoMo dialogue
+(50 test QA pairs) for responses generated by all
+six methods: No Context, Full Context, DYCP,
+Secom, MemoChat, and SCM4LLMs. For each
+test question, the annotator was shown the user
+query, the gold answer, and the model-generated
+answer, with the method identity hidden, and as-
+signed a correctness label from −1,0,1, where −1
+indicates an incorrect answer, 0 a partially correct
+answer 8, and 1 a correct answer. As shown in
+Figure 5, GPT4Score shows consistent differences
+in distributions across the three human labels and
+exhibits strong correlations with the human judg-
+ments across all methods (r = 0.417–0.842, p <
+0.01), confirming that it provides a reliable ap-
+proximation of human evaluation.
+Figure 5: Comparison of GPT4Score with human
+correctness labels on one LoCoMo dialogue (50
+test QA pairs) across six methods. GPT4Score
+(0–100) is grouped by human ratings—incorrect
+(−1), partially correct (0), and correct (1).
+5.5.3 Retrieval Accuracy
+To better understand how each context manage-
+ment method identifies relevant context, we com-
+pare their retrieval accuracy in Table 5 among
+methods that incorporate a retriever. DYCP
+8 As an example of a partially correct response, when the test
+query is "When did Caroline join a mentorship program?"
+and the gold answer is "The weekend before 17 July 2023",
+the model responded with "around July 17, 2023", capturing
+the rough time period but missing the exact reference.
+LoCoMo MT-Bench+ SCM4LLMs
+Agent Method EM R-1 R-2 R-L Quality Latency (↓) Quality Latency (↓) Quality Latency (↓)
+Qwen2.5-7B-Instruct
+(1M)
+No Context 1.28 3.23 0.31 2.80 21.49 (±21.0) 0.04 (±0.0) 62.81 (±27.1) 0.04 (±0.0) 58.57 (±32.7) 0.05 (±0.1)
+Full Context 22.96 9.02 3.90 8.30 72.57 (±31.4) 6.56 (±1.5) 81.47 (±24.7) 3.47 (±0.6) 74.92 (±26.3) 4.41 (±1.1)
+CondMem 16.84 12.39* 4.83 11.49* 57.07 (±36.9) 7.45 (±4.7) 60.89 (±31.8) 11.36 (±7.6) 60.08 (±35.4) 10.36 (±6.8)
+DYCP (Ours) 25.00* 9.63 4.15 8.88 75.96 (±30.0) 0.98 (±0.3) 84.09 (±22.0) 0.40 (±0.3) 75.62 (±26.0) 0.77 (±0.5)
+Mistral-Nemo-Instruct
+(128k)
+No Context 4.08 5.24 0.92 4.64 23.90 (±26.4) 0.05 (±0.0) 60.82 (±28.7) 0.06 (±0.0) 55.28 (±32.4) 0.07 (±0.1)
+Full Context 21.17 20.59 8.81 19.33 66.75 (±35.4) 10.18 (±2.2) 74.50 (±26.5) 5.77 (±1.1) 71.06 (±27.7) 7.30 (±1.8)
+CondMem 16.58 16.53 5.96 15.19 56.36 (±37.7) 3.25 (±1.2) 58.71 (±29.4) 7.72 (±4.7) 65.10 (±31.0) 5.57 (±3.2)
+DYCP (Ours) 25.26 23.44* 10.39 21.84* 79.04* (±31.1) 1.52 (±0.5) 84.01* (±22.4) 0.66 (±0.5) 80.68* (±22.4) 1.15 (±0.6)
+Table 7: Evaluation of answer quality (↑) and response latency (↓) on three long-form dialogue bench-
+marks: LoCoMo, MT-Bench+, and SCM4LLMs, using two open-source long-context models (Qwen2.5-
+7B-Instruct, Mistral-Nemo-Instruct). All other formatting conventions (e.g., marking best and second-
+best results, p-value annotations, and latency shading) follow Table 4.
+consistently outperforms both SCM4LLMs and
+SeCom, regardless of the retriever used. Interest-
+ingly, while SCM4LLMs achieves slightly higher
+retrieval accuracy than SeCom (both using the top
+5 retrieved results on the LoCoMo benchmark),
+SeCom demonstrates comparable or even better
+answer quality, as shown in Table 4. This sug-
+gests that segment-level retrieval—which better
+preserves the sequential nature and coherence of
+the previous context—may contribute to improved
+downstream generation quality.
+A key difference among segment-level methods
+lies in how segment boundaries are constructed.
+SeCom and MemoChat perform segmentation of-
+fline, prior to the current turn. This introduces
+two limitations: (i) segmentation cannot adapt to
+the specific information needs of each query, and
+(ii) coarse, pre-defined segments may mix relevant
+and irrelevant turns, adding noise during retrieval.
+In contrast, DYCP defines segments on demand
+based on relevance dynamics, allowing boundaries
+to shift depending on the current query.
+Table 8 compares segmentation granularity and
+retrieval volume across segment-level approaches.
+As shown, our method achieves finer segmen-
+tation granularity across datasets and adjusts re-
+trieval volume more flexibly on a per-turn basis.
+Here, “finer granularity” does not simply mean re-
+trieving more or shorter segments; rather, it re-
+flects DYCP’s ability to isolate compact, coherent
+spans whose boundaries align with query-relevant
+changes in discourse. Such query-adaptive seg-
+mentation prevents unrelated content from be-
+ing bundled together, reducing contextual noise
+and improving retrieval precision. This con-
+trast is particularly evident on the LoCoMo—the
+benchmark with the longest multi-topic conversa-
+tions—where coarse offline segmentation is most
+likely to mismatch the discourse structure. Ac-
+cordingly, DYCP outperforms other methods in
+both retrieval accuracy and answer quality.
+LoCoMo MT-Bench+ SCM4LLMs
+TpS. RS. TpS. RS. TpS. RS.
+MemoChat 21.6 1.3 3.1 1.2 3.2 1.7
+SeCom 13.2 5 3.0 3 4.5 2
+DYCP (Ours) 4.4 13.0 3.8 2.2 4.9 2.3
+Table 8: Comparison of segment-level approaches
+in terms of average Turns per Segment (TpS.)
+and Retrieved Segments (RS.) across three bench-
+marks. TpS. reflects segmentation granularity,
+while RS. indicates the number of segments re-
+trieved per turn. RS. for SeCom is manually
+set per benchmark, unlike the automatic retrieval
+used in MemoChat and DYCP. Segmentation in
+MemoChat and SeCom is performed by GPT-4o.
+5.6 Open-Source LLMs Evaluation
+We further examine whether DYCP generalizes to
+open-source long-context models, and also eval-
+uate CondMem under the same setting, since its
+preprocessing step requires extensive LLM calls
+(see Section 5.2.2). We conduct experiments on
+Qwen2.5-7B-Instruct (1M context) and Mistral-
+Nemo-Instruct (128k context). As shown in Ta-
+ble 7, DYCP consistently achieves the best an-
+swer quality across all three benchmarks, out-
+performing both Full Context and CondMem.
+While DYCP maintains low and stable online la-
+tency, CondMem shows substantially higher la-
+tency with large variance due to its iterative
+retrieval-refinement process. Although CondMem
+reports high ROUGE-1/2/L scores on Qwen, these
+gains are largely driven by keyword overlap: the
+method often reproduces short 1–2-gram frag-
+ments from the gold answer without providing the
+correct factual content. This inflates ROUGE de-
+spite low semantic accuracy, as reflected in both
+EM and GPT4Score. These results demonstrate
+that DYCP remains effective across models, in-
+cluding smaller open-source LLMs.
+In addition, the results reveal a practical latency
+advantage: when running open-source models on
+modest local GPUs, passing the full dialogue as
+input leads to substantially higher latency com-
+pared to API-based LLMs. By reducing the input
+context, DYCP mitigates this penalty and yields
+a dramatic reduction in end-to-end inference time,
+making long-context conversation far more feasi-
+ble in local deployment settings.
+6 Analysis
+To gain insight into when and how context pruning
+improves long-form dialogue, we analyze three
+factors. First, we compare GPT-4o and GPT-
+4.1 to assess how enhanced long-context capabil-
+ities in recent LLMs affect the benefits of prun-
+ing. We attribute observed shifts in performance
+to dialogue-level characteristics, such as dialogue
+length and the position of relevant context (Sec-
+tion 6.1). Second, to understand what makes prun-
+ing effective, we examine different retrieval con-
+figurations, focusing on the trade-off between re-
+call and precision (Section 6.2). Third, we inves-
+tigate whether continuity-preserving turns—those
+with low but positive relevance—meaningfully
+contribute to answer quality. To this end, we
+perform an ablation study that progressively re-
+moves the least-relevant turns within the segments
+selected by DYCP, analyzing how systematically
+dropping these turns affects downstream perfor-
+mance (Section 6.3). All analyses in this section
+are conducted on the LoCoMo benchmark.
+6.1 A Study Across GPT-4o and GPT-4.1GPT-4o
+GPT-4.1
+Figure 6: Win–Tie–Lose breakdown of DYCP
+compared to Full Context. Each segment rep-
+resents the proportion of test cases where our
+method achieved a higher score (Win), the same
+score (Tie), or a lower score (Lose).
+Figure 6 shows that DYCP achieves better answer
+quality than Full Context in a larger portion of
+cases (Win) under GPT-4o. However, with GPT-
+4.1, the two methods produce more similar results,
+as the proportion of ties increases and the wins de-
+crease. DYCP still offers substantial gains in ef-
+ficiency, such as fewer input tokens and lower la-
+tency (Section 5.5.1), but it remains important to
+understand what accounts for the improved long-
+context processing observed in GPT-4.1.
+Figure 7 shows how the number of pre-
+ceding dialogue turns affects the answer qual-
+ity in the current turn. Under GPT-4o, Full
+Context performance drops sharply for long
+conversations—particularly those exceeding 300
+turns—whereas DYCP maintains stable perfor-
+mance even in long conversations. In contrast,
+GPT-4.1 exhibits no such degradation, with Full
+Context performing comparably to DYCP across
+all dialogue lengths.
+Figure 7: Comparison of answer quality between
+DYCP and Full Context based on the number of
+preceding dialogue turns for GPT-4o and GPT-4.1.
+Figure 8 shows the impact of relevant context posi-
+tion on answer quality. Under GPT-4o, Full Con-
+text exhibits strong position sensitivity, perform-
+ing worse when the relevant information appears
+early in the input (1-100), and gradually improv-
+ing as it moves closer to the end (301-400). This
+indicates a recency bias (Peysakhovich and Lerer,
+2023; Press et al., 2022), where earlier content is
+underutilized. With GPT-4.1, position sensitivity
+largely disappears for Full Context, and its perfor-
+mance becomes comparable to that of DYCP, sug-
+gesting improved capacity to retain and attend to
+long-range information.
+Figure 8: Comparison of answer quality between
+DYCP and Full Context based on the relevant con-
+text positions for GPT-4o and GPT-4.1.
+When Full Context setting fails under GPT-4o, it
+typically shows one of two behaviors: (1) halluci-
+nating information or (2) incorrectly claiming that
+no relevant information is available. Table 9 and
+Table 10 (A.1) illustrate examples of each case.
+On the other hand, when Full Context yields bet-
+ter results than DYCP (Lose), it is primarily due
+to imperfect retrievals by DYCP. A more detailed
+error analysis is provided in A.2.
+Question: Which month was John in Italy?
+Gold Answer: December, 2023
+DYCP
+Response: John visited Italy in December 2023.
+Evaluation: The Bot accurately answers the User Question by
+correctly identifying that John visited Italy in December 2023.
+This information is supported by the conversation history, specif-
+ically the exchange on January 2, 2024, where John mentions his
+trip to Italy last month, which refers to December 2023. The Bot
+Response aligns with the Gold Response, affirming its correct-
+ness. [[rating]] 100
+Full Context
+Response: From our prior chats, your trip to Italy was in Novem-
+ber 2023. We spoke about it on December 26th, 2023.
+Evaluation: The user asks for the month when John was in Italy,
+based on the conversation history. The Gold Response correctly
+states it as December 2023. The Bot incorrectly states that the
+trip was in November 2023. In the conversation history dated
+January 2, 2024, at 5:26 pm, John’s trip to Italy in December
+2023 is clearly mentioned: "By the way, have you been to Italy?
+I had a blast there last month." The Bot Response does not match
+this information and is therefore inaccurate. The inaccuracy is
+significant enough to merit a lower rating. [[rating]] 30
+Table 9: An example where the Full Context set-
+ting hallucinates.
+6.2 Recall or Precision?
+To understand what makes pruning effective, we
+examine how different retrieval configurations in-
+fluence the trade-off between recall and precision,
+and how this trade-off, in turn, affects both an-
+swer quality and latency. Figure 9 shows the re-
+lationship between retrieval recall, precision, and
+final answer quality across different retrieval con-
+figurations in DYCP. We observe a strong posi-
+tive correlation between recall and answer qual-
+ity: as recall increases, from Top-1 to Dynamic
+selection, answer quality steadily improves. This
+trend suggests that ensuring the inclusion of rele-
+vant content (high recall), even at the cost of intro-
+ducing some mildly irrelevant information (lower
+precision), is critical for downstream answer gen-
+eration. However, further increases in recall yield
+diminishing improvements, indicating that retriev-
+ing additional segments beyond a certain point of-
+fers limited value. Furthermore, because higher
+recall typically increases response latency (Fig-
+ure 10), the goal is not simply to maximize recall,
+but to identify the point at which additional con-
+text no longer contributes meaningful gains.
+Figure 9: Relationship between retrieval recall,
+precision, and final answer quality in DYCP.
+Figure 10: Relationship between retrieval recall
+and response latency.
+These observations also help explain why the con-
+cept underlying DYCP’s dynamic span selection
+is effective. Unlike fixed top-k approaches, DYCP
+expands the retrieved span only when the rele-
+vance dynamics justify it—adding segments only
+when sustained positive gain is detected. When
+relevance drops, the method stops expanding the
+span, preventing unnecessary context accumula-
+tion. This form of adaptive control maintains high
+recall where it matters while avoiding the latency
+penalty associated with uniformly larger contexts.
+In this sense, the concept of DYCP provides a
+principled mechanism for balancing recall and ef-
+ficiency in long-form, multi-topic dialogue.
+6.3 Ablation on Continuity-Preserving Turns
+To evaluate the contribution of low-relevance but
+continuity-preserving turns in DYCP, we conduct
+an ablation study that progressively removes the
+least-relevant turns from each selected segment
+while measuring the resulting changes in answer
+quality and latency. These removed turns corre-
+spond to low but positive relevance scores—turns
+that are not directly needed for answering the cur-
+rent user query but help maintain local continuity
+and discourse flow within the segment. When re-
+moval would leave a segment empty, we retain the
+single most relevant turn to ensure that each seg-
+ment preserves at least one anchor point.
+Figure 11 shows that removing these turns leads
+to small but consistent drops in answer quality, in-
+dicating that even weakly relevant turns contribute
+useful contextual signals that support downstream
+generation. Latency decreases slightly as more
+turns are removed, as expected from the shorter
+input. Overall, the trend suggests that these low-
+relevance turns help maintain a more coherent lo-
+cal context, providing modest but meaningful ben-
+efits despite their limited direct relevance.
+Figure 11: Ablation on continuity-preserving turns.
+We progressively remove the least-relevant turns
+within each DYCP-selected segment (Bottom-
+1/2/3) and compare the resulting answer qual-
+ity (left axis) and response latency (right axis)
+against the original Dynamic setting. When re-
+moval would leave a segment empty, we retain the
+single most-relevant turn so that each segment pre-
+serves at least one anchor point.
+7 Discussion
+We raise the question: "Do LLMs meaningfully
+process far less context than their actual input to-
+ken limits?" While models like GPT-4o support
+up to 128k tokens, our results indicate that they
+struggle to fully utilize even 25k tokens, espe-
+cially when relevant information appears earlier
+in the input. This observation is consistent with
+prior findings such as An et al. (2024b), who show
+that effective context lengths often fall short, typ-
+ically not exceeding half of their training lengths.
+Interestingly, GPT-4.1, with its 1M token limit,
+handles the same 25k-token dialogues much more
+reliably. This contrast suggests that token limits
+may reflect throughput capacity rather than effec-
+tive working memory, and that in practice, models
+may attend to only a smaller, attention-weighted
+subset of the input. Several factors may con-
+tribute to this discrepancy, including the challenge
+of learning long-range dependencies during train-
+ing, position-sensitive encoding, and attention sat-
+uration. Thus, while token limits continue to grow,
+effective long-context understanding may remain
+limited, both due to architectural bottlenecks and
+practical concerns such as inference cost.
+8 Conclusion
+In this work, we present DYCP, a dynamic con-
+text pruning method for long-form dialogue that
+selects query-relevant segments in real time, with-
+out pre-segmentation or incurring additional LLM
+calls. Across three benchmarks, DYCP consis-
+tently improves answer quality while significantly
+reducing response latency. Our findings show that,
+high recall is more beneficial than precision for re-
+trieval, and preserving the sequential nature of di-
+alogue plays a key role in response generation. We
+also show that even as LLMs improve in handling
+longer contexts, context management remains cru-
+cial for both response quality and latency. We of-
+fer a simple yet effective segment-level context
+management strategy that is dynamic, scalable,
+and LLM-agnostic, making it well-suited for real-
+world deployment. Our research materials, in-
+cluding the source code, the LoCoMo split (Sec-
+tion 5.1), and all outputs from each experimen-
+tal unit (Section 5.5.1), are available at: https:
+//github.com/to/be/updated.
+References
+Chenxin An, Fei Huang, Jun Zhang, Shansan
+Gong, Xipeng Qiu, Chang Zhou, and Lingpeng
+Kong. 2024a. Training-free long-context scal-
+ing of large language models. In Proceedings of
+the 41st International Conference on Machine
+Learning, ICML’24. JMLR.org.
+Chenxin An, Jun Zhang, Ming Zhong, Lei Li,
+Shansan Gong, Yao Luo, Jingjing Xu, and Ling-
+peng Kong. 2024b. Why does the effective con-
+text length of llms fall short?
+Jon Bentley. 1984. Programming pearls: al-
+gorithm design techniques. Commun. ACM,
+27(9):865–873.
+Jianlyu Chen, Shitao Xiao, Peitian Zhang,
+Kun Luo, Defu Lian, and Zheng Liu.
+2024. M3-embedding: Multi-linguality, multi-
+functionality, multi-granularity text embed-
+dings through self-knowledge distillation. In
+Findings of the Association for Computational
+Linguistics: ACL 2024, pages 2318–2335,
+Bangkok, Thailand. Association for Computa-
+tional Linguistics.
+Shouyuan Chen, Sherman Wong, Liangjian Chen,
+and Yuandong Tian. 2023. Extending context
+window of large language models via positional
+interpolation.
+Gautier Izacard, Mathilde Caron, Lucas Hosseini,
+Sebastian Riedel, Piotr Bojanowski, Armand
+Joulin, and Edouard Grave. 2021. Towards
+unsupervised dense information retrieval with
+contrastive learning. CoRR, abs/2112.09118.
+Gregory Kamradt. 2023. Needle In
+A Haystack: Pressure testing llms.
+https://github.com/gkamradt/
+LLMTest_NeedleInAHaystack.
+LangChain Team. 2023. Conversation summary
+memory. https://python.langchain.
+com/v0.1/docs/modules/memory/
+types/summary/.
+Yibin Lei, Liang Ding, Yu Cao, Changtong Zan,
+Andrew Yates, and Dacheng Tao. 2023. Un-
+supervised dense retrieval with relevance-aware
+contrastive pre-training. In Findings of the As-
+sociation for Computational Linguistics: ACL
+2023, pages 10932–10940, Toronto, Canada.
+Association for Computational Linguistics.
+Chin-Yew Lin. 2004. ROUGE: A package for
+automatic evaluation of summaries. In Text
+Summarization Branches Out, pages 74–81,
+Barcelona, Spain. Association for Computa-
+tional Linguistics.
+Junru Lu, Siyu An, Mingbao Lin, Gabriele Per-
+gola, Yulan He, Di Yin, Xing Sun, and Yun-
+sheng Wu. 2023. Memochat: Tuning llms
+to use memos for consistent long-range open-
+domain conversation.
+Adyasha Maharana, Dong-Ho Lee, Sergey
+Tulyakov, Mohit Bansal, Francesco Barbieri,
+and Yuwei Fang. 2024. Evaluating very
+long-term conversational memory of LLM
+agents. In Proceedings of the 62nd Annual
+Meeting of the Association for Computational
+Linguistics (Volume 1: Long Papers), pages
+13851–13870, Bangkok, Thailand. Association
+for Computational Linguistics.
+Mistral. 2024. Mistral nemo: our new best small
+model. https://mistral.ai/news/
+mistral-nemo. Accessed: YYYY-MM-
+DD.
+Zhuoshi Pan, Qianhui Wu, Huiqiang Jiang, Xu-
+fang Luo, Hao Cheng, Dongsheng Li, Yuqing
+Yang, Chin-Yew Lin, H. Vicky Zhao, Lili Qiu,
+and Jianfeng Gao. 2025. On memory con-
+struction and retrieval for personalized conver-
+sational agents.
+Bowen Peng, Jeffrey Quesnelle, Honglu Fan, and
+Enrico Shippole. 2024. YaRN: Efficient context
+window extension of large language models. In
+The Twelfth International Conference on Learn-
+ing Representations.
+Alexander Peysakhovich and Adam Lerer. 2023.
+Attention sorting combats recency bias in long
+context language models.
+Ofir Press, Noah A. Smith, and Mike Lewis. 2022.
+Train short, test long: Attention with linear bi-
+ases enables input length extrapolation.
+Qwen. 2025. Qwen2.5 technical report.
+Bing Wang, Xinnian Liang, Jian Yang, Hui
+Huang, Shuangzhi Wu, Peihao Wu, Lu Lu, Ze-
+jun Ma, and Zhoujun Li. 2025a. Scm: Enhanc-
+ing large language model with self-controlled
+memory framework.
+Qingyue Wang, Yanhe Fu, Yanan Cao, Shuai
+Wang, Zhiliang Tian, and Liang Ding. 2025b.
+Recursively summarizing enables long-term di-
+alogue memory in large language models.
+Ruifeng Yuan, Shichao Sun, Yongqi Li, Zili Wang,
+Ziqiang Cao, and Wenjie Li. 2025. Personal-
+ized large language model assistant with evolv-
+ing conditional memory. In Proceedings of
+the 31st International Conference on Compu-
+tational Linguistics, pages 3764–3777, Abu
+Dhabi, UAE. Association for Computational
+Linguistics.
+A Appendix
+A.1 Example
+Table 10 illustrates a failure case of Full Context,
+where the model incorrectly claims that no rele-
+vant information is available.
+Question: What are Joanna’s plans for her finished screenplay in
+January 2022?
+Gold Answer: Submit it to film festivals and get producers and
+directors to check it out
+DYCP
+Response: Based on our conversation, in January 2022, Joanna
+planned to submit her finished screenplay to various film festivals
+in the hope that producers and directors would take notice of it.
+She was eager to receive feedback and explore new opportunities
+for her work to potentially make it to the big screen.
+Evaluation: The Bot Response accurately answers the User
+Question, closely matching the Gold Response. Both responses
+correctly identify Joanna’s plans for her finished screenplay in
+January 2022: to submit it to film festivals in hopes that produc-
+ers and directors would notice her work. (...) The bot provides a
+complete and relevant answer to the user question. [[rating]] 100
+Full Context
+Response: I’m sorry, but I don’t have any information on
+Joanna’s plans for her screenplay from January 2022.
+Evaluation: The Bot Response inaccurately states that there is
+no information available on Joanna’s plans for her screenplay
+from January 2022, when, in fact, the conversation history con-
+tains this information. (...) Therefore, the Bot Response fails to
+accurately answer the User Question based on the provided con-
+versation history. The lack of accurate recognition of the data
+contained in the conversation history warrants a low score for the
+bot’s response. [[rating]] 10
+Table 10: An example where the Full Context set-
+ting incorrectly finds no relevant information.
+A.2 Error Analysis
+Among the 23% of cases where DYCP lose (Fig-
+ure 6), 66% of these errors are attributable to im-
+perfect retrievals, highlighting the importance of
+retrieval quality. An additional 34% arise when
+DYCP generates an essentially correct answer that
+is rated marginally lower than the full context re-
+sponse by GPTScore. To better understand the
+retrieval-related failures, we categorize them into
+three types: Missing Critical Turns (8%), Partial
+Recall (16%), and Retrieval Noise (42%).
+Missing Critical Turns The retrieved context
+omits essential dialogue turns that are required to
+answer the question. This category includes ap-
+proximately 5% of cases where the retrieval fails
+to hit the gold context, i.e., failures in Hit (H) as
+reported in Table 5.
+Partial Recall While the retrieved segments con-
+tain relevant information, they lack full coverage
+Question: What causes does John feel passionate about support-
+ing?
+Gold Answer: Veterans, schools, infrastructure
+DYCP
+Response: From our conversation, John seems passionate about
+supporting education and mentorship for underserved communi-
+ties, raising awareness and funds for issues like homelessness and
+domestic abuse, and engaging in activities that support veterans’
+rights and the local fire station. John is driven by a desire to make
+a positive impact in the community through various forms of vol-
+unteering.
+Evaluation: The Bot Response provides a detailed answer by
+highlighting various causes that John feels passionate about, but
+it slightly embellishes the initial inquiry by listing numerous ac-
+tivities. The User Question asks specifically about "causes" John
+is passionate about supporting. The Gold Response provides a
+succinct list of main causes: Veterans, schools, and infrastructure.
+The Bot Response mentions some related causes but also includes
+additional activities like homelessness, domestic abuse, and sup-
+porting the fire station, which are mentioned in the broader con-
+text of the conversation but are not directly cited in the Gold
+Response as main causes. (. . .) Therefore, the Bot Response is
+somewhat helpful but doesn ́t precisely match the concise focus
+intended by the Question and the Gold Response. [[rating]] 75
+Full Context
+Response: Throughout our conversations, John has expressed a
+strong passion for supporting various causes, including military
+veterans’ rights, education reform, infrastructure development,
+and community service, such as participating in firefighting and
+raising funds through charity events. He believes in making a
+positive impact in our community and helping those in need.
+Evaluation: The Bot Response accurately answers the User
+Question by listing the causes John is passionate about: mili-
+tary veterans’ rights, education reform, infrastructure develop-
+ment, and community service. This aligns with the conversation
+history, where John frequently discusses his involvement and in-
+terest in these areas. Additionally, the Bot Response expands on
+the Gold Response by adding community service, which is con-
+sistent with John’s involvement in initiatives like firefighting and
+charity events. Therefore, the Bot Response is comprehensive
+and correct. [[rating]] 95
+Table 11: An example where the DYCP generates
+an expanded response.
+necessary for a complete answer. This often oc-
+curs when the answer depends on multiple seg-
+ments scattered across the dialogue, and not all of
+them are successfully retrieved. In some cases, the
+issue is not due to retrieval failure, but rather stems
+from the subjective nature of the question, where
+referring to segments other than the gold context
+could still yield a reasonable answer.
+Retrieval Noise Although the necessary informa-
+tion is included in the retrieved context, the model
+fails to handle it effectively due to surrounding
+content. These cases frequently resemble failures
+observed in the full context setting, where exces-
+sive input dilutes the signal. As in Table 11, the
+model tends to generate factually correct but ver-
+bose answers that obscure the main point.
