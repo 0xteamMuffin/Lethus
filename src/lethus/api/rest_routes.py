@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
-from typing import List, Optional, Dict, Any
+from typing import List, Optional
 from datetime import datetime
 import httpx
 
@@ -14,23 +14,23 @@ router = APIRouter()
 class UserSettingsRequest(BaseModel):
     user_id: str
     openai_api_key: Optional[str] = None
-    openai_base_url: Optional[str] = None  
-    llm_model: Optional[str] = None  
-    llm_temperature: Optional[float] = None  
-    llm_max_tokens: Optional[int] = None  
-    embedding_model: Optional[str] = None  
-    embedding_dim: Optional[int] = None  
+    openai_base_url: Optional[str] = None
+    llm_model: Optional[str] = None
+    llm_temperature: Optional[float] = None
+    llm_max_tokens: Optional[int] = None
+    embedding_model: Optional[str] = None
+    embedding_dim: Optional[int] = None
 
 
 class UserSettingsResponse(BaseModel):
     user_id: str
     has_api_key: bool
-    openai_base_url: Optional[str] = None  
-    llm_model: Optional[str] = None  
-    llm_temperature: Optional[float] = None  
-    llm_max_tokens: Optional[int] = None  
-    embedding_model: Optional[str] = None  
-    embedding_dim: Optional[int] = None  
+    openai_base_url: Optional[str] = None
+    llm_model: Optional[str] = None
+    llm_temperature: Optional[float] = None
+    llm_max_tokens: Optional[int] = None
+    embedding_model: Optional[str] = None
+    embedding_dim: Optional[int] = None
     default_openai_base_url: str
     default_llm_model: str
     default_llm_temperature: float
@@ -55,8 +55,8 @@ class AvailableModelsResponse(BaseModel):
 
 class ValidateApiKeyRequest(BaseModel):
     api_key: str
-    base_url: Optional[str] = None  
-    model: Optional[str] = None  
+    base_url: Optional[str] = None
+    model: Optional[str] = None
 
 
 class ValidateApiKeyResponse(BaseModel):
@@ -67,7 +67,7 @@ class ValidateApiKeyResponse(BaseModel):
 class ConversationRequest(BaseModel):
     user_id: str
     title: Optional[str] = "New Conversation"
-    enhanced_mode: Optional[bool] = True  
+    enhanced_mode: Optional[bool] = True
 
 
 class ConversationResponse(BaseModel):
@@ -231,7 +231,7 @@ async def validate_api_key(request: ValidateApiKeyRequest):
                 return ValidateApiKeyResponse(valid=False, error="Invalid API key")
             else:
                 return ValidateApiKeyResponse(
-                    valid=False, 
+                    valid=False,
                     error=f"API error: {response.status_code}"
                 )
     except httpx.TimeoutException:
@@ -281,7 +281,7 @@ async def get_available_models(user_id: str, db: Session = Depends(get_db)):
             else:
                 return AvailableModelsResponse(llm_models=[], embedding_models=[])
                 
-    except Exception as e:
+    except Exception:
         return AvailableModelsResponse(llm_models=[], embedding_models=[])
 
 
@@ -457,11 +457,11 @@ async def delete_conversation(conversation_id: int, db: Session = Depends(get_db
         raise HTTPException(status_code=404, detail="Conversation not found")
     
     db.query(Turn).filter(Turn.conversation_id == conversation_id).delete()
-    
     db.delete(conversation)
     db.commit()
     
     return {"message": "Conversation deleted successfully"}
+
 
 @router.get("/stats")
 async def get_stats(db: Session = Depends(get_db)):

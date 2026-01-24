@@ -49,7 +49,6 @@ app.add_middleware(
 )
 
 app.include_router(proxy_router, prefix="/v1", tags=["OpenAI API"])
-
 app.include_router(rest_router, prefix="/api", tags=["REST API"])
 
 
@@ -60,17 +59,3 @@ async def root():
         "service": "Lethus Proxy",
         "version": "0.1.0"
     }
-
-
-def main():
-    import uvicorn
-    uvicorn.run(
-        "lethus.api.rest:app",
-        host=settings.api_host,
-        port=settings.api_port,
-        reload=True
-    )
-
-
-if __name__ == "__main__":
-    main()

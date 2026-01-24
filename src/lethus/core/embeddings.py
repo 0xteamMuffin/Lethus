@@ -1,7 +1,3 @@
-"""
-Embedding provider for OpenAI-compatible APIs.
-Supports OpenAI, GitHub Models, Azure OpenAI, and other compatible endpoints.
-"""
 from abc import ABC, abstractmethod
 from typing import List, Optional
 import numpy as np
@@ -10,28 +6,21 @@ from ..config import settings
 
 
 class EmbeddingProvider(ABC):
-    """Abstract base class for embedding providers."""
-    
     @property
     @abstractmethod
     def dim(self) -> int:
-        """Return embedding dimension."""
         pass
     
     @abstractmethod
     def embed_text(self, text: str) -> np.ndarray:
-        """Generate embedding for single text."""
         pass
     
     @abstractmethod
     def embed_batch(self, texts: List[str]) -> np.ndarray:
-        """Generate embeddings for multiple texts."""
         pass
 
 
 class OpenAIEmbeddingProvider(EmbeddingProvider):
-    """OpenAI-compatible embeddings (works with OpenAI, GitHub Models, Azure, etc.)."""
-    
     def __init__(
         self,
         api_key: str = None,
@@ -46,7 +35,6 @@ class OpenAIEmbeddingProvider(EmbeddingProvider):
         self._client = None
     
     def _get_client(self):
-        """Lazy load the OpenAI client."""
         if self._client is None:
             from openai import OpenAI
             self._client = OpenAI(api_key=self.api_key, base_url=self.base_url)
@@ -74,19 +62,6 @@ def get_embedding_provider(
     base_url: Optional[str] = None,
     embedding_dim: Optional[int] = None
 ) -> EmbeddingProvider:
-    """
-    Factory function to get embedding provider.
-    
-    Uses OpenAI-compatible API. Settings priority:
-    1. Explicit parameters (from user settings in DB)
-    2. Environment defaults (from .env)
-    
-    Args:
-        api_key: API key for the embedding service
-        model: Embedding model name
-        base_url: API base URL
-        embedding_dim: Embedding dimension
-    """
     return OpenAIEmbeddingProvider(
         api_key=api_key,
         model=model,

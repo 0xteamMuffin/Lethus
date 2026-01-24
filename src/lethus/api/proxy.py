@@ -5,10 +5,9 @@ import logging
 from dataclasses import dataclass, field
 from typing import List, Optional, Dict, AsyncIterator
 from fastapi import APIRouter, Request, HTTPException, Depends
-from fastapi.responses import StreamingResponse
-from sqlalchemy.orm import Session
-from fastapi import APIRouter, Request, HTTPException
 from fastapi.responses import StreamingResponse, JSONResponse
+from sqlalchemy.orm import Session
+from pydantic import BaseModel
 import httpx
 import numpy as np
 
@@ -18,6 +17,7 @@ from ..storage.postgres import get_db, User, Conversation
 from ..core.dycp import DYCPCore
 from ..core.ghost_graph import GhostGraph
 from ..core.embeddings import get_embedding_provider
+from .models import ChatMessage
 
 logging.basicConfig(
     level=logging.INFO,
@@ -40,11 +40,11 @@ class DYCPStats:
     decay_lambda: float = 0.0
     processing_time_ms: float = 0.0
     enhanced_mode: bool = True
-    entity_names: List[str] = field(default_factory=list)  
-    boost_details: List[dict] = field(default_factory=list)  
-    tau: float = 0.0  
-    theta: float = 0.0  
-    similarity_scores: List[float] = field(default_factory=list)  
+    entity_names: List[str] = field(default_factory=list)
+    boost_details: List[dict] = field(default_factory=list)
+    tau: float = 0.0
+    theta: float = 0.0
+    similarity_scores: List[float] = field(default_factory=list)
     
     @property
     def tokens_saved(self) -> int:
@@ -93,15 +93,15 @@ def estimate_messages_tokens(messages: List[Dict]) -> int:
         total += estimate_tokens(m.get("content", "")) + 4
     return total
 
-router = APIRouter()
 
+router = APIRouter()
 _components = {}
 
 
 def _get_components(api_key: str = None, embedding_model: str = None, base_url: str = None):
     if "dycp" not in _components:
         _components["dycp"] = DYCPCore()
-        _components["ghost_graphs"] = {}  
+        _components["ghost_graphs"] = {}
         _components["milvus"] = get_milvus_storage()
     
     model_suffix = f"_{embedding_model}" if embedding_model else ""
@@ -133,31 +133,20 @@ def _get_ghost_graph(conversation_id: int) -> GhostGraph:
     return components["ghost_graphs"][conversation_id]
 
 
-from .models import (
-    ChatMessage,
-    ChatCompletionRequest,
-    ChatCompletionChoice,
-    ChatCompletionUsage,
-    ChatCompletionResponse
-)
-
-from pydantic import BaseModel
-from typing import List as TypingList
-
 class ProxyChatCompletionRequest(BaseModel):
     model: str
-    messages: TypingList[ChatMessage]
+    messages: List[ChatMessage]
     temperature: Optional[float] = 0.7
     max_tokens: Optional[int] = None
     stream: Optional[bool] = False
     top_p: Optional[float] = 1.0
     frequency_penalty: Optional[float] = 0.0
     presence_penalty: Optional[float] = 0.0
-    stop: Optional[TypingList[str]] = None
+    stop: Optional[List[str]] = None
     user: Optional[str] = None
-    user_id: Optional[str] = None  
-    conversation_id: Optional[int] = None  
-    enhanced_mode: Optional[bool] = None  
+    user_id: Optional[str] = None
+    conversation_id: Optional[int] = None
+    enhanced_mode: Optional[bool] = None
 
 
 def apply_dycp_reduction(
@@ -248,7 +237,7 @@ def apply_dycp_reduction(
         })
     
     stats.ghost_graph_entities = total_entities
-    stats.entity_names = list(set(all_entity_names))  
+    stats.entity_names = list(set(all_entity_names))
     
     original_similarities = similarities.copy()
     similarities = ghost_graph.boost_similarities(
@@ -278,7 +267,7 @@ def apply_dycp_reduction(
     stats.spans_found = len(spans)
     stats.span_details = spans
     
-    reduced_messages = list(system_messages)  
+    reduced_messages = list(system_messages)
     
     if spans:
         selected_indices = set()
@@ -400,7 +389,7 @@ async def chat_completions(request: Request, db: Session = Depends(get_db)):
     user_base_url = None
     
     if auth_header.startswith("Bearer "):
-        api_key = auth_header[7:]  
+        api_key = auth_header[7:]
         user_base_url = None
     elif "user_id" in body:
         user_id = body.get("user_id")
@@ -430,7 +419,7 @@ async def chat_completions(request: Request, db: Session = Depends(get_db)):
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Invalid request: {e}")
     
-    enhanced_mode = True  
+    enhanced_mode = True
     db_conversation_id = chat_request.conversation_id
     
     if chat_request.enhanced_mode is not None:
@@ -453,13 +442,10 @@ async def chat_completions(request: Request, db: Session = Depends(get_db)):
     )
     
     effective_embedding_model = user_embedding_model or settings.openai_embedding_model
-    
     effective_embedding_dim = user_embedding_dim or settings.openai_embedding_dim
-    
     effective_base_url = user_base_url or settings.openai_base_url
     
     messages = [{"role": m.role, "content": m.content} for m in chat_request.messages]
-    
     conversation_id = db_conversation_id or _get_conversation_id(messages)
     
     last_user_msg = None
@@ -496,7 +482,7 @@ async def chat_completions(request: Request, db: Session = Depends(get_db)):
     model = effective_llm_model.lower()
     if "claude" in model or "anthropic" in model:
         raise HTTPException(
-            status_code=400, 
+            status_code=400,
             detail="Anthropic models not yet supported. Use OpenAI models."
         )
     else:
@@ -526,7 +512,7 @@ async def chat_completions(request: Request, db: Session = Depends(get_db)):
             "X-Lethus-Decay-Lambda": f"{stats.decay_lambda:.3f}",
             "X-Lethus-Tau": f"{stats.tau:.3f}",
             "X-Lethus-Theta": f"{stats.theta:.3f}",
-            "X-Lethus-Entity-Names": json.dumps(stats.entity_names[:20]),  
+            "X-Lethus-Entity-Names": json.dumps(stats.entity_names[:20]),
             "X-Lethus-Span-Details": json.dumps(stats.span_details),
             "X-Lethus-Boost-Count": str(len(stats.boost_details)),
         })
@@ -547,7 +533,7 @@ async def chat_completions(request: Request, db: Session = Depends(get_db)):
             headers={
                 "Cache-Control": "no-cache, no-transform",
                 "Connection": "keep-alive",
-                "X-Accel-Buffering": "no",  
+                "X-Accel-Buffering": "no",
                 "Transfer-Encoding": "chunked",
                 **dycp_headers
             }

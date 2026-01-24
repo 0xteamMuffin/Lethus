@@ -1,22 +1,7 @@
-"""
-Lethus - Main Entry Point
-
-Usage:
-    lethus                # Run the server (default)
-    lethus --init-db      # Initialize database
-    
-Or via Python:
-    python -m lethus.main
-
-The server exposes:
-    /v1/chat/completions  - OpenAI-compatible proxy with DYCP context reduction
-    /api/*                - REST API for direct integration
-"""
 import argparse
 
 
 def run_server():
-    """Run the Lethus server with proxy and REST API."""
     import uvicorn
     from .config import settings
     
@@ -26,10 +11,6 @@ def run_server():
     print(f"  Proxy endpoint: http://{settings.api_host}:{settings.api_port}/v1/chat/completions")
     print(f"  REST API:       http://{settings.api_host}:{settings.api_port}/api/")
     print("=" * 60)
-    print()
-    print("  To use with any OpenAI-compatible client:")
-    print(f'    base_url = "http://{settings.api_host}:{settings.api_port}/v1"')
-    print()
     
     uvicorn.run(
         "lethus.api.rest:app",
@@ -40,47 +21,11 @@ def run_server():
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Lethus - DYCP Context Reduction Proxy",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Lethus is an OpenAI-compatible proxy that applies Dynamic Context Pruning
-to reduce conversation history to only relevant spans.
-
-Usage with any OpenAI client:
-    from openai import OpenAI
-    client = OpenAI(
-        base_url="http://localhost:8000/v1",
-        api_key="your-openai-key"
-    )
+    parser = argparse.ArgumentParser(description="Lethus - DYCP Context Reduction Proxy")
     
-The proxy automatically:
-    1. Intercepts chat requests
-    2. Applies DYCP (Kadane's Algorithm) to select relevant history
-    3. Forwards reduced context to OpenAI
-    4. Stores interactions for future retrieval
-        """
-    )
-    
-    parser.add_argument(
-        "--init-db",
-        action="store_true",
-        help="Initialize PostgreSQL database tables and exit"
-    )
-    
-    parser.add_argument(
-        "--host",
-        type=str,
-        default=None,
-        help="Override host (default: from config)"
-    )
-    
-    parser.add_argument(
-        "--port",
-        type=int,
-        default=None,
-        help="Override port (default: from config)"
-    )
+    parser.add_argument("--init-db", action="store_true", help="Initialize database tables")
+    parser.add_argument("--host", type=str, default=None, help="Override host")
+    parser.add_argument("--port", type=int, default=None, help="Override port")
     
     args = parser.parse_args()
     
@@ -91,7 +36,6 @@ The proxy automatically:
         print("Database initialized successfully.")
         return
     
-    # Override settings if provided
     if args.host or args.port:
         from .config import settings
         if args.host:

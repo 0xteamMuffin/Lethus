@@ -1,23 +1,12 @@
-"""
-Milvus vector storage for embeddings.
-Supports multi-tenant conversations with entity metadata for Ghost Graph.
-"""
 from pymilvus import MilvusClient, DataType
 import numpy as np
-from typing import List, Dict, Any, Tuple, Optional
+from typing import List, Dict, Any, Tuple
 import time
 
 from ..config import settings
 
 
 class MilvusStorage:
-    """
-    Milvus vector storage with support for:
-    - Multi-tenant conversations
-    - Entity metadata for Ghost Graph
-    - Time-based decay queries
-    """
-    
     def __init__(
         self,
         uri: str = None,
@@ -32,7 +21,6 @@ class MilvusStorage:
         self._init_collection()
     
     def _init_collection(self):
-        """Create collection with schema if it doesn't exist."""
         if self.client.has_collection(self.collection_name):
             return
         
@@ -45,7 +33,7 @@ class MilvusStorage:
         schema.add_field(field_name="embedding", datatype=DataType.FLOAT_VECTOR, dim=self.embedding_dim)
         schema.add_field(field_name="turn_index", datatype=DataType.INT64)
         schema.add_field(field_name="timestamp", datatype=DataType.DOUBLE)
-        schema.add_field(field_name="entities", datatype=DataType.VARCHAR, max_length=4096)  # JSON string
+        schema.add_field(field_name="entities", datatype=DataType.VARCHAR, max_length=4096)
         
         index_params = self.client.prepare_index_params()
         index_params.add_index(
@@ -69,12 +57,6 @@ class MilvusStorage:
         conversation_id: int = 0,
         entities: str = "[]"
     ) -> int:
-        """
-        Add a conversation turn to the collection.
-        
-        Returns:
-            The turn index
-        """
         turn_index = self.get_turn_count(conversation_id)
         
         data = [{
@@ -91,7 +73,6 @@ class MilvusStorage:
         return turn_index
     
     def get_turn_count(self, conversation_id: int = 0) -> int:
-        """Get the number of turns in a conversation."""
         filter_expr = f"conversation_id == {conversation_id}"
         results = self.client.query(
             collection_name=self.collection_name,
@@ -108,12 +89,6 @@ class MilvusStorage:
         self,
         conversation_id: int = 0
     ) -> Tuple[List[Dict[str, Any]], np.ndarray]:
-        """
-        Get all turns in chronological order for DYCP algorithm.
-        
-        Returns:
-            (turns, embeddings) tuple
-        """
         filter_expr = f"conversation_id == {conversation_id}" if conversation_id else "turn_index >= 0"
         
         results = self.client.query(
@@ -148,9 +123,6 @@ class MilvusStorage:
         conversation_id: int = 0,
         top_k: int = 20
     ) -> List[Dict[str, Any]]:
-        """
-        Search for similar turns using vector similarity.
-        """
         filter_expr = f"conversation_id == {conversation_id}" if conversation_id else None
         
         results = self.client.search(
@@ -185,9 +157,6 @@ class MilvusStorage:
         conversation_id: int = 0,
         limit: int = 20
     ) -> List[Dict[str, Any]]:
-        """
-        Search for turns mentioning a specific entity.
-        """
         safe_entity = entity_name.replace('"', '\\"')
         filter_expr = f'entities like "%{safe_entity}%"'
         
@@ -204,22 +173,18 @@ class MilvusStorage:
         return results
     
     def clear_conversation(self, conversation_id: int):
-        """Delete all turns for a conversation."""
         filter_expr = f"conversation_id == {conversation_id}"
         self.client.delete(collection_name=self.collection_name, filter=filter_expr)
     
     def clear_all(self):
-        """Drop and recreate the collection."""
         self.client.drop_collection(self.collection_name)
         self._init_collection()
 
 
-# Default instance
 _milvus_storage = None
 
 
 def get_milvus_storage() -> MilvusStorage:
-    """Get or create the default Milvus storage instance"""
     global _milvus_storage
     if _milvus_storage is None:
         _milvus_storage = MilvusStorage()
