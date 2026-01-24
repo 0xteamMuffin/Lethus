@@ -1,6 +1,8 @@
 """
-DYCP Memory Server - Production MCP Server with:
-- Dynamic Context Pruning (Kadane's Algorithm)
+Lethus - MCP Server with Long-Term Memory
+
+Features:
+- Dynamic span selection (Kadane's Algorithm)
 - Semantic Decay (Time-weighted relevance)
 - Ghost Graph (Entity linking for pronoun resolution)
 - Predictive Prefetching (Cache warming)
@@ -15,14 +17,14 @@ import json
 import os
 
 # Configuration via environment variables
-MILVUS_URI = os.environ.get("DYCP_MILVUS_URI", "http://localhost:19530")  # Production cluster
+MILVUS_URI = os.environ.get("DYCP_MILVUS_URI", "http://localhost:19530")
 DECAY_LAMBDA = float(os.environ.get("DYCP_DECAY_LAMBDA", "0.98"))
 EMBEDDING_MODEL = os.environ.get("DYCP_EMBEDDING_MODEL", "all-MiniLM-L6-v2")
 
 # Initialize components
-mcp = FastMCP("dycp-memory-server")
+mcp = FastMCP("lethus")
 
-print(f"Initializing DYCP Memory Server...")
+print(f"Initializing Lethus...")
 print(f"  Milvus URI: {MILVUS_URI}")
 print(f"  Decay Lambda: {DECAY_LAMBDA}")
 print(f"  Embedding Model: {EMBEDDING_MODEL}")
@@ -32,7 +34,7 @@ core = DYCPCore(model_name=EMBEDDING_MODEL, decay_lambda=DECAY_LAMBDA)
 ghost_graph = GhostGraph(use_spacy=True)
 prefetch_cache = PrefetchCache(max_size=50)
 
-print("DYCP Memory Server Ready.")
+print("Lethus Ready.")
 
 def _compute_context(query: str) -> tuple:
     """
@@ -77,7 +79,7 @@ def _compute_context(query: str) -> tuple:
         return [], "No relevant context found in memory."
     
     # Format context string
-    context_str = "--- RELEVANT CONTEXT (DYCP + Decay + Ghost Graph) ---\n"
+    context_str = "--- RELEVANT CONTEXT ---\n"
     
     prev_end = -1
     for start, end in spans:
@@ -129,12 +131,12 @@ def store_interaction(role: str, content: str) -> str:
 @mcp.tool()
 def get_context(query: str) -> str:
     """
-    Retrieves relevant conversation context using DYCP with Semantic Decay.
+    Retrieves relevant conversation context from long-term memory.
     
-    This tool uses:
-    1. Dynamic span selection (Kadane's Algorithm) - finds coherent conversation blocks
+    Uses:
+    1. Dynamic span selection - finds coherent conversation blocks
     2. Semantic Decay - older messages need higher relevance to be recalled
-    3. Ghost Graph - entity linking boosts related context even with low direct similarity
+    3. Ghost Graph - entity linking boosts related context
     
     Args:
         query: The user's current question or topic

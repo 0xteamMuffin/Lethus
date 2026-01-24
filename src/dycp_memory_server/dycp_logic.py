@@ -5,7 +5,7 @@ from typing import List, Dict, Tuple, Optional
 class DYCPCore:
     def __init__(self, model_name: str = "all-MiniLM-L6-v2", decay_lambda: float = 0.98):
         """
-        Initialize the DYCP Core with a local embedding model.
+        Initialize the core with a local embedding model.
         
         Args:
             model_name: HuggingFace model for embeddings
@@ -60,9 +60,9 @@ class DYCPCore:
 
     def get_pruned_indices(self, similarities: np.ndarray) -> List[Tuple[int, int]]:
         """
-        KadaneDial: Modified Kadane's algorithm for dynamic context span selection.
+        Modified Kadane's algorithm for dynamic context span selection.
         
-        From the DYCP paper (Section 5.4):
+        Parameters:
         - τ (tau) = 0.6: Gain threshold - shifts z-scores so only significantly 
           above-average turns have positive gain
         - θ (theta) = 1.0: Stopping threshold - if cumulative gain drops more than 

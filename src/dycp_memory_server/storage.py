@@ -16,7 +16,7 @@ class MilvusStorage:
         Initialize Milvus connection.
         
         Args:
-            uri: Milvus cluster endpoint (e.g., "http://localhost:19530")
+            uri: Milvus endpoint (e.g., "http://localhost:19530")
         """
         self.client = MilvusClient(uri=uri)
         self._init_collection()
@@ -168,7 +168,7 @@ class MilvusStorage:
 
     def get_all_turns_ordered(self) -> Tuple[List[Dict[str, Any]], np.ndarray]:
         """
-        Get all turns in chronological order (for DYCP algorithm).
+        Get all turns in chronological order.
         Returns turns and their embeddings.
         """
         results = self.client.query(
