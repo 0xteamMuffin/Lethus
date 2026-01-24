@@ -24,6 +24,7 @@ class ChatCompletionRequest(BaseModel):
     presence_penalty: Optional[float] = 0.0
     stop: Optional[List[str]] = None
     user: Optional[str] = None
+    user_id: Optional[str] = None  # For database API key lookup
 
 
 class ChatCompletionChoice(BaseModel):
