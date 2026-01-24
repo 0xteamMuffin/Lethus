@@ -5,15 +5,17 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install minimal runtime dependencies only
+# Install build and runtime dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     libpq5 \
+    gcc \
+    libpq-dev \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
 
-# Upgrade pip
-RUN pip install --no-cache-dir --upgrade pip
+# Upgrade pip and install build system
+RUN pip install --no-cache-dir --upgrade pip hatchling
 
 # Copy and install Python dependencies first (better caching)
 COPY pyproject.toml ./
