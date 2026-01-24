@@ -9,7 +9,6 @@ import {
   ArrowUp,
   LayoutGrid,
   Menu,
-  Radar,
   Settings,
 } from "lucide-react";
 import { toast, Toaster } from "sonner";
@@ -29,7 +28,6 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 interface LibreChatInterfaceProps {
   onToggleSidebar?: () => void;
-  onToggleMemory?: () => void;
   conversationId?: number;
   onConversationCreated?: (id: number) => void;
 }
@@ -44,7 +42,6 @@ interface Message {
 
 const LibreChatInterface: React.FC<LibreChatInterfaceProps> = ({
   onToggleSidebar,
-  onToggleMemory,
   conversationId: propConversationId,
   onConversationCreated,
 }) => {
@@ -366,13 +363,6 @@ const LibreChatInterface: React.FC<LibreChatInterfaceProps> = ({
           </button>
           <button className="p-2 rounded-lg hover:bg-[#1a1a1a] hover:text-white transition-all duration-200">
             <LayoutGrid size={18} />
-          </button>
-
-          <button
-            onClick={onToggleMemory}
-            className="p-2 text-gray-400 hover:text-white lg:hidden"
-          >
-            <Radar size={18} />
           </button>
         </div>
       </header>
