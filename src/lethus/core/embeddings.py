@@ -70,7 +70,7 @@ class OpenAIEmbeddingProvider(EmbeddingProvider):
         """Lazy load the OpenAI client."""
         if self._client is None:
             from openai import OpenAI
-            self._client = OpenAI(api_key=self.api_key)
+            self._client = OpenAI(api_key=self.api_key, base_url=settings.openai_base_url)
         return self._client
     
     @property

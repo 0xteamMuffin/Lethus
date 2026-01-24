@@ -463,7 +463,7 @@ async def chat_completions(request: Request, db: Session = Depends(get_db)):
         )
     else:
         # OpenAI (default)
-        target_url = "https://api.openai.com/v1/chat/completions"
+        target_url = f"{settings.openai_base_url}/chat/completions"
     
     # Forward request
     headers = {
@@ -543,7 +543,7 @@ async def list_models(request: Request):
     
     async with httpx.AsyncClient() as client:
         response = await client.get(
-            "https://api.openai.com/v1/models",
+            f"{settings.openai_base_url}/models",
             headers={"Authorization": f"Bearer {api_key}"}
         )
         return response.json()
@@ -560,7 +560,7 @@ async def get_model(model_id: str, request: Request):
     
     async with httpx.AsyncClient() as client:
         response = await client.get(
-            f"https://api.openai.com/v1/models/{model_id}",
+            f"{settings.openai_base_url}/models/{model_id}",
             headers={"Authorization": f"Bearer {api_key}"}
         )
         return response.json()
