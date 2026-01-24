@@ -9,6 +9,7 @@ from contextlib import asynccontextmanager
 from ..config import settings
 from ..storage.postgres import init_db
 from .proxy import router as proxy_router
+from .rest_routes import router as rest_router
 
 
 @asynccontextmanager
@@ -35,6 +36,9 @@ app.add_middleware(
 
 # OpenAI-compatible proxy routes
 app.include_router(proxy_router, prefix="/v1", tags=["OpenAI API"])
+
+# REST API routes
+app.include_router(rest_router, prefix="/api", tags=["REST API"])
 
 
 @app.get("/")

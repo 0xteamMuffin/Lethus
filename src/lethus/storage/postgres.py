@@ -13,6 +13,17 @@ from ..config import settings
 Base = declarative_base()
 
 
+class User(Base):
+    """Stores user settings and API keys"""
+    __tablename__ = "users"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(String(255), unique=True, index=True)  # Client-generated user ID
+    openai_api_key = Column(String(500), nullable=True)  # Encrypted in production
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 class Conversation(Base):
     """Stores conversation metadata"""
     __tablename__ = "conversations"

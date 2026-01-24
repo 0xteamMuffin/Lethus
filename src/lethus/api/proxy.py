@@ -12,6 +12,9 @@ import time
 import logging
 from dataclasses import dataclass, field
 from typing import List, Optional, Dict, AsyncIterator
+from fastapi import APIRouter, Request, HTTPException, Depends
+from fastapi.responses import StreamingResponse
+from sqlalchemy.orm import Session
 from fastapi import APIRouter, Request, HTTPException
 from fastapi.responses import StreamingResponse, JSONResponse
 import httpx
@@ -19,6 +22,7 @@ import numpy as np
 
 from ..config import settings
 from ..storage.milvus import get_milvus_storage
+from ..storage.postgres import get_db, User
 from ..core.dycp import DYCPCore
 from ..core.ghost_graph import GhostGraph
 from ..core.embeddings import get_embedding_provider
@@ -367,21 +371,44 @@ async def stream_and_capture(
 # === API Endpoints ===
 
 @router.post("/chat/completions")
-async def chat_completions(request: Request):
+async def chat_completions(request: Request, db: Session = Depends(get_db)):
     """
     OpenAI-compatible chat completions endpoint.
     Applies DYCP context reduction before forwarding to LLM.
+    
+    Accepts API key via:
+    1. Authorization header (Bearer token) - for standard OpenAI clients
+    2. user_id in request body - fetches API key from database
     """
-    # Get API key from header
-    auth_header = request.headers.get("Authorization", "")
-    if not auth_header.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Missing API key")
-    
-    api_key = auth_header[7:]  # Remove "Bearer "
-    
-    # Parse request body
+    # Parse request body first
     body = await request.json()
     
+    # Get API key from header or database
+    auth_header = request.headers.get("Authorization", "")
+    api_key = None
+    
+    if auth_header.startswith("Bearer "):
+        # Standard OpenAI client with API key in header
+        api_key = auth_header[7:]  # Remove "Bearer "
+    elif "user_id" in body:
+        # Fetch API key from database using user_id
+        user_id = body.get("user_id")
+        user = db.query(User).filter(User.user_id == user_id).first()
+        
+        if not user or not user.openai_api_key:
+            raise HTTPException(
+                status_code=400,
+                detail="No API key configured. Please set your OpenAI API key in settings."
+            )
+        
+        api_key = user.openai_api_key
+    else:
+        raise HTTPException(
+            status_code=401,
+            detail="Missing API key. Provide Authorization header or user_id in request body."
+        )
+    
+    # Parse and validate request
     try:
         chat_request = ChatCompletionRequest(**body)
     except Exception as e:
