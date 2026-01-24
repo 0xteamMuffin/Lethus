@@ -8,10 +8,15 @@ Usage:
 """
 import json
 import hashlib
+import time
+import logging
+from dataclasses import dataclass, field
 from typing import List, Optional, Dict, AsyncIterator
 from fastapi import APIRouter, Request, HTTPException, Depends
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
+from fastapi import APIRouter, Request, HTTPException
+from fastapi.responses import StreamingResponse, JSONResponse
 import httpx
 import numpy as np
 
@@ -21,6 +26,80 @@ from ..storage.postgres import get_db, User
 from ..core.dycp import DYCPCore
 from ..core.ghost_graph import GhostGraph
 from ..core.embeddings import get_embedding_provider
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s | %(levelname)s | %(message)s',
+    datefmt='%H:%M:%S'
+)
+logger = logging.getLogger("lethus.dycp")
+
+
+@dataclass
+class DYCPStats:
+    """Statistics from DYCP context reduction."""
+    original_messages: int = 0
+    reduced_messages: int = 0
+    original_tokens: int = 0
+    reduced_tokens: int = 0
+    spans_found: int = 0
+    span_details: List[tuple] = field(default_factory=list)
+    ghost_graph_entities: int = 0
+    ghost_graph_boosts: int = 0
+    decay_lambda: float = 0.0
+    processing_time_ms: float = 0.0
+    
+    @property
+    def tokens_saved(self) -> int:
+        return self.original_tokens - self.reduced_tokens
+    
+    @property
+    def reduction_percent(self) -> float:
+        if self.original_tokens == 0:
+            return 0.0
+        return (self.tokens_saved / self.original_tokens) * 100
+    
+    @property
+    def message_reduction_percent(self) -> float:
+        if self.original_messages == 0:
+            return 0.0
+        return ((self.original_messages - self.reduced_messages) / self.original_messages) * 100
+    
+    def log(self):
+        """Log formatted stats."""
+        if self.original_messages == self.reduced_messages:
+            logger.info(f"DYCP | No reduction needed ({self.original_messages} messages, ~{self.original_tokens:,} tokens)")
+            return
+        
+        logger.info("=" * 70)
+        logger.info("DYCP Context Reduction Summary")
+        logger.info("=" * 70)
+        logger.info(f"Messages:     {self.original_messages} -> {self.reduced_messages} ({self.message_reduction_percent:.1f}% reduction)")
+        logger.info(f"Tokens:       ~{self.original_tokens:,} -> ~{self.reduced_tokens:,} ({self.reduction_percent:.1f}% reduction)")
+        logger.info(f"Tokens Saved: ~{self.tokens_saved:,}")
+        logger.info("-" * 70)
+        logger.info(f"Spans Found:  {self.spans_found}")
+        for i, (start, end) in enumerate(self.span_details):
+            logger.info(f"  Span {i+1}: messages {start}-{end} ({end - start + 1} messages)")
+        logger.info(f"Ghost Graph:  {self.ghost_graph_entities} entities, {self.ghost_graph_boosts} boosts applied")
+        logger.info(f"Decay Lambda: {self.decay_lambda}")
+        logger.info(f"Processing:   {self.processing_time_ms:.2f}ms")
+        logger.info("=" * 70)
+
+
+def estimate_tokens(text: str) -> int:
+    """Estimate token count (roughly 4 chars per token for English)."""
+    return len(text) // 4
+
+
+def estimate_messages_tokens(messages: List[Dict]) -> int:
+    """Estimate total tokens in message list."""
+    total = 0
+    for m in messages:
+        # Role + content + message overhead (~4 tokens)
+        total += estimate_tokens(m.get("content", "")) + 4
+    return total
 
 router = APIRouter()
 
@@ -86,19 +165,27 @@ def apply_dycp_reduction(
     messages: List[Dict],
     api_key: str,
     conversation_id: int
-) -> List[Dict]:
+) -> tuple[List[Dict], DYCPStats]:
     """
     Apply DYCP to reduce message history to relevant spans only.
     
-    Takes full conversation history from client, returns pruned version.
+    Takes full conversation history from client, returns pruned version and stats.
     """
+    start_time = time.time()
+    stats = DYCPStats()
+    stats.original_messages = len(messages)
+    stats.original_tokens = estimate_messages_tokens(messages)
+    stats.decay_lambda = settings.decay_lambda
+    
     if len(messages) <= 2:
         # Too short to prune - just pass through
-        return messages
+        stats.reduced_messages = len(messages)
+        stats.reduced_tokens = stats.original_tokens
+        stats.processing_time_ms = (time.time() - start_time) * 1000
+        return messages, stats
     
     components = _get_components(api_key)
     dycp = components["dycp"]
-    milvus = components["milvus"]
     embeddings = components.get(f"embeddings_{api_key[:8]}" if api_key else "embeddings")
     if not embeddings:
         embeddings = get_embedding_provider(api_key=api_key)
@@ -110,7 +197,10 @@ def apply_dycp_reduction(
     conversation = [m for m in messages if m["role"] != "system"]
     
     if len(conversation) <= 2:
-        return messages
+        stats.reduced_messages = len(messages)
+        stats.reduced_tokens = stats.original_tokens
+        stats.processing_time_ms = (time.time() - start_time) * 1000
+        return messages, stats
     
     # Get the current query (last user message)
     last_user_msg = None
@@ -120,12 +210,18 @@ def apply_dycp_reduction(
             break
     
     if not last_user_msg:
-        return messages
+        stats.reduced_messages = len(messages)
+        stats.reduced_tokens = stats.original_tokens
+        stats.processing_time_ms = (time.time() - start_time) * 1000
+        return messages, stats
     
     # Build embeddings for conversation history (excluding last message)
     history = conversation[:-1]
     if not history:
-        return messages
+        stats.reduced_messages = len(messages)
+        stats.reduced_tokens = stats.original_tokens
+        stats.processing_time_ms = (time.time() - start_time) * 1000
+        return messages, stats
     
     # Generate embeddings
     history_texts = [m["content"] for m in history]
@@ -147,8 +243,10 @@ def apply_dycp_reduction(
     
     # Ghost Graph boost
     history_with_entities = []
+    total_entities = 0
     for i, m in enumerate(history):
         entities = ghost_graph.extract_entities(m["content"])
+        total_entities += len(entities)
         history_with_entities.append({
             "role": m["role"],
             "content": m["content"],
@@ -156,14 +254,21 @@ def apply_dycp_reduction(
             "entities": json.dumps([e["name"] for e in entities])
         })
     
+    stats.ghost_graph_entities = total_entities
+    
+    # Track boosts
+    original_similarities = similarities.copy()
     similarities = ghost_graph.boost_similarities(
         last_user_msg,
         history_with_entities,
         similarities
     )
+    stats.ghost_graph_boosts = int(np.sum(similarities > original_similarities))
     
     # Get spans using Kadane's Algorithm
     spans = dycp.get_pruned_indices(similarities)
+    stats.spans_found = len(spans)
+    stats.span_details = spans
     
     # Build reduced message list
     reduced_messages = list(system_messages)  # Keep system prompts
@@ -182,7 +287,12 @@ def apply_dycp_reduction(
     # Always include the last message (current query)
     reduced_messages.append(conversation[-1])
     
-    return reduced_messages
+    # Final stats
+    stats.reduced_messages = len(reduced_messages)
+    stats.reduced_tokens = estimate_messages_tokens(reduced_messages)
+    stats.processing_time_ms = (time.time() - start_time) * 1000
+    
+    return reduced_messages, stats
 
 
 async def store_interaction(
@@ -318,13 +428,10 @@ async def chat_completions(request: Request, db: Session = Depends(get_db)):
             break
     
     # Apply DYCP reduction
-    reduced_messages = apply_dycp_reduction(messages, api_key, conversation_id)
+    reduced_messages, stats = apply_dycp_reduction(messages, api_key, conversation_id)
     
-    # Log reduction stats
-    original_count = len(messages)
-    reduced_count = len(reduced_messages)
-    if original_count != reduced_count:
-        print(f"[DYCP] Reduced {original_count} → {reduced_count} messages")
+    # Log detailed stats
+    stats.log()
     
     # Build forwarded request
     forward_body = body.copy()
@@ -346,6 +453,18 @@ async def chat_completions(request: Request, db: Session = Depends(get_db)):
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json"
+    }
+    
+    # DYCP stats headers
+    dycp_headers = {
+        "X-Lethus-Original-Messages": str(stats.original_messages),
+        "X-Lethus-Reduced-Messages": str(stats.reduced_messages),
+        "X-Lethus-Original-Tokens": str(stats.original_tokens),
+        "X-Lethus-Reduced-Tokens": str(stats.reduced_tokens),
+        "X-Lethus-Tokens-Saved": str(stats.tokens_saved),
+        "X-Lethus-Reduction-Percent": f"{stats.reduction_percent:.1f}",
+        "X-Lethus-Spans-Found": str(stats.spans_found),
+        "X-Lethus-Processing-Ms": f"{stats.processing_time_ms:.2f}",
     }
     
     async with httpx.AsyncClient(timeout=120.0) as client:
@@ -374,7 +493,8 @@ async def chat_completions(request: Request, db: Session = Depends(get_db)):
                     media_type="text/event-stream",
                     headers={
                         "Cache-Control": "no-cache",
-                        "Connection": "keep-alive"
+                        "Connection": "keep-alive",
+                        **dycp_headers
                     }
                 )
         else:
@@ -403,7 +523,8 @@ async def chat_completions(request: Request, db: Session = Depends(get_db)):
                     api_key
                 )
             
-            return result
+            # Return with DYCP stats headers
+            return JSONResponse(content=result, headers=dycp_headers)
 
 
 @router.get("/models")
