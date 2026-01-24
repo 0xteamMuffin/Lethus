@@ -209,41 +209,56 @@ By shipping the **Proxy + DYCP Algorithm + Ghost Graph**, we proved that "Signal
 
 #### Prerequisites
 - Docker and Docker Compose installed
-- Python 3.11+ (for local development)
+- Python 3.10+ (for backend)
 - Node.js 18+ (for frontend)
 
-#### Quick Start (Docker - Recommended)
+#### Quick Start
 
 1. **Clone and navigate to the repository**
 ```bash
 git clone <repository-url>
-cd lethus-ai
+cd Lethus
 ```
 
 2. **Set up environment variables**
 ```bash
 cp .env.example .env
-# Add your OpenAI API key to .env
+# Edit .env and add your OpenAI/GitHub Models API key
 ```
 
-3. **Start all services**
+3. **Start infrastructure services**
 ```bash
 cd docker
 docker-compose up -d
 ```
 
-This will start:
+This starts:
 - PostgreSQL (port 5432)
 - Milvus vector database (port 19530)
-- Lethus API backend (port 8000)
+- etcd (Milvus dependency)
+- MinIO (Milvus storage)
 
-4. **Initialize the database**
+4. **Install Python dependencies**
 ```bash
 cd ..
-python -m lethus.storage.postgres  # Creates tables
+python -m venv .venv
+source .venv/bin/activate  # On Windows: .venv/Scripts/activate
+pip install -e .
 ```
 
-5. **Start the frontend**
+5. **Download SpaCy model** (required for Ghost Graph entity extraction)
+```bash
+python -m spacy download en_core_web_sm
+```
+
+6. **Start the backend**
+```bash
+lethus
+```
+
+The API will be available at `http://localhost:8000`
+
+7. **Start the frontend** (in a separate terminal)
 ```bash
 cd frontend
 npm install
@@ -251,32 +266,6 @@ npm run dev
 ```
 
 Access the UI at `http://localhost:3000`
-
-#### Alternative: Local Development
-
-1. **Install Python dependencies**
-```bash
-python -m venv .venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-pip install -e .
-```
-
-2. **Start services (with Docker)**
-```bash
-cd docker
-docker-compose up -d postgres etcd minio milvus-standalone
-```
-
-3. **Run the backend**
-```bash
-lethus  # Starts FastAPI on port 8000
-```
-
-4. **Run the frontend** (in separate terminal)
-```bash
-cd frontend
-npm run dev
-```
 
 #### Demo Scenarios
 
@@ -289,7 +278,6 @@ python examples/07_comparison_demo.py
 This demonstrates:
 - A 50-turn conversation being reduced to relevant spans
 - Token savings (typically 60-80% reduction)
-- Context comparison output saved to `context_logs/`
 
 **Scenario 2: Proxy Usage (OpenAI-Compatible)**
 ```bash
@@ -308,14 +296,12 @@ Shows how to use Lethus as a drop-in replacement for OpenAI's API endpoint.
 
 Check that all services are running:
 ```bash
-docker ps  # Should show postgres, milvus, etcd, minio containers
+docker ps  # Should show lethus-postgres, milvus-standalone, milvus-etcd, milvus-minio
 curl http://localhost:8000/health  # Backend health check
-curl http://localhost:3000  # Frontend should respond
 ```
 
 View DYCP stats in action:
 - Chat logs show original vs reduced message counts
-- `context_logs/` directory contains JSON comparisons
 - Frontend displays reduction percentages after each message
 
 
