@@ -2,12 +2,7 @@
 import React, { useState, useRef, useEffect } from "react";
 import {
   ChevronDown,
-  Paperclip,
-  Code,
-  Server,
-  Mic,
   ArrowUp,
-  LayoutGrid,
   Menu,
   Settings,
 } from "lucide-react";
@@ -361,9 +356,6 @@ const LibreChatInterface: React.FC<LibreChatInterfaceProps> = ({
           >
             <Settings size={18} />
           </button>
-          <button className="p-2 rounded-lg hover:bg-[#1a1a1a] hover:text-white transition-all duration-200">
-            <LayoutGrid size={18} />
-          </button>
         </div>
       </header>
       <main className="flex-1 flex flex-col w-full overflow-y-auto min-h-0">
@@ -453,29 +445,7 @@ const LibreChatInterface: React.FC<LibreChatInterfaceProps> = ({
               />
             </div>
 
-            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-0 mt-2 md:mt-3">
-              <div className="flex items-center gap-2 overflow-x-auto w-full sm:w-auto pb-1 sm:pb-0 scrollbar-none">
-                <button className="p-2 text-gray-400 hover:text-white hover:bg-[#1a1a1a] rounded-lg transition-all duration-200 shrink-0">
-                  <Paperclip size={18} />
-                </button>
-
-                <button className="flex items-center gap-2 bg-[#1a1a1a] px-3 py-2 rounded-lg border border-[#2a2a2a] hover:bg-[#212121] hover:border-[#333333] transition-all duration-200 text-xs font-medium text-gray-300 shrink-0">
-                  <Code size={14} />
-                  <span>Code</span>
-                </button>
-
-                <button className="flex items-center gap-2 bg-[#1a1a1a] px-3 py-2 rounded-lg border border-[#2a2a2a] hover:bg-[#212121] hover:border-[#333333] transition-all duration-200 text-xs font-medium text-gray-300 shrink-0">
-                  <Server size={14} />
-                  <span>MCP</span>
-                  <ChevronDown size={12} className="opacity-70" />
-                </button>
-              </div>
-
-              <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
-                <button className="p-2 text-gray-400 hover:text-white hover:bg-[#1a1a1a] rounded-lg transition-all duration-200">
-                  <Mic size={20} />
-                </button>
-
+            <div className="flex items-center justify-end mt-2 md:mt-3">
                 <button
                   onClick={handleSendMessage}
                   disabled={!message.trim() || isSending}
@@ -487,7 +457,6 @@ const LibreChatInterface: React.FC<LibreChatInterfaceProps> = ({
                 >
                   <ArrowUp size={18} strokeWidth={2.5} />
                 </button>
-              </div>
             </div>
           </div>
         </div>

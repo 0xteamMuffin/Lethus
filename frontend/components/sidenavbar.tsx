@@ -2,14 +2,10 @@
 import { useState, useEffect } from 'react';
 import { 
   MessageCircle, 
-  PenBox, 
-  Bookmark, 
-  Settings,
   Plus,
   Trash2,
   X 
 } from 'lucide-react';
-import SidebarItem from './ui/sidebaritem';
 import { getConversations, createConversation, deleteConversation, type Conversation } from '@/api/message';
 import { toast } from 'sonner';
 
@@ -198,28 +194,6 @@ const SideNavbar = ({
             </div>
           </div>
         )}
-      </div>
-
-      <div className="flex items-center justify-between border-t border-[#2a2a2a] p-3">
-        
-        <div className="flex items-center gap-3 overflow-hidden group cursor-pointer rounded-xl py-2 px-2 hover:bg-[#121212] transition-all duration-200">
-          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[#2a2a2a] border border-[#333333]">
-             <span className="text-xs font-bold text-white">L</span>
-          </div>
-          <div className="flex flex-col items-start overflow-hidden">
-            <span className="truncate text-sm font-medium text-gray-200 group-hover:text-white transition-colors">
-                Lethus AI
-            </span>
-            <span className="truncate text-[10px] text-gray-500 font-mono uppercase tracking-wide">
-                Pro
-            </span>
-          </div>
-        </div>
-
-        <button className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg text-gray-500 hover:bg-[#1a1a1a] hover:text-white transition-all duration-200">
-          <Settings size={18} />
-        </button>
-
       </div>
 
     </div>
