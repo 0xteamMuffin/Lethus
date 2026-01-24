@@ -228,56 +228,71 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                 : "bg-transparent text-gray-200 pl-0 pt-0"
             }`}
           >
-            <ReactMarkdown
-              remarkPlugins={[remarkGfm]}
-              components={{
-                p: ({ children }) => (
-                  <p className="mb-2 last:mb-0">{children}</p>
-                ),
-                code: ({ className, children }) => {
-                  const isBlock = className?.includes("language-");
+            {/* Typing indicator when streaming but no content yet */}
+            {!isUser && isStreaming && !content ? (
+              <div className="flex items-center gap-1.5">
+                <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+              </div>
+            ) : (
+              <>
+                <ReactMarkdown
+                  remarkPlugins={[remarkGfm]}
+                  components={{
+                    p: ({ children }) => (
+                      <p className="mb-2 last:mb-0">{children}</p>
+                    ),
+                    code: ({ className, children }) => {
+                      const isBlock = className?.includes("language-");
 
-                  return isBlock ? (
-                    <pre className="bg-[#111] border border-[#2a2a2a] rounded-xl p-4 overflow-x-auto my-3 text-sm">
-                      <code className={className}>{children}</code>
-                    </pre>
-                  ) : (
-                    <code className="bg-[#2a2a2a] px-1.5 py-0.5 rounded text-sm">
-                      {children}
-                    </code>
-                  );
-                },
-                a: ({ href, children }) => (
-                  <a
-                    href={href}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-blue-400 hover:underline"
-                  >
-                    {children}
-                  </a>
-                ),
-                ul: ({ children }) => (
-                  <ul className="list-disc pl-6 my-2 space-y-1">{children}</ul>
-                ),
-                ol: ({ children }) => (
-                  <ol className="list-decimal pl-6 my-2 space-y-1">
-                    {children}
-                  </ol>
-                ),
-                h1: ({ children }) => (
-                  <h1 className="text-xl font-semibold my-3">{children}</h1>
-                ),
-                h2: ({ children }) => (
-                  <h2 className="text-lg font-semibold my-3">{children}</h2>
-                ),
-                h3: ({ children }) => (
-                  <h3 className="text-base font-semibold my-2">{children}</h3>
-                ),
-              }}
-            >
-              {content}
-            </ReactMarkdown>
+                      return isBlock ? (
+                        <pre className="bg-[#111] border border-[#2a2a2a] rounded-xl p-4 overflow-x-auto my-3 text-sm">
+                          <code className={className}>{children}</code>
+                        </pre>
+                      ) : (
+                        <code className="bg-[#2a2a2a] px-1.5 py-0.5 rounded text-sm">
+                          {children}
+                        </code>
+                      );
+                    },
+                    a: ({ href, children }) => (
+                      <a
+                        href={href}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-blue-400 hover:underline"
+                      >
+                        {children}
+                      </a>
+                    ),
+                    ul: ({ children }) => (
+                      <ul className="list-disc pl-6 my-2 space-y-1">{children}</ul>
+                    ),
+                    ol: ({ children }) => (
+                      <ol className="list-decimal pl-6 my-2 space-y-1">
+                        {children}
+                      </ol>
+                    ),
+                    h1: ({ children }) => (
+                      <h1 className="text-xl font-semibold my-3">{children}</h1>
+                    ),
+                    h2: ({ children }) => (
+                      <h2 className="text-lg font-semibold my-3">{children}</h2>
+                    ),
+                    h3: ({ children }) => (
+                      <h3 className="text-base font-semibold my-2">{children}</h3>
+                    ),
+                  }}
+                >
+                  {content}
+                </ReactMarkdown>
+                {/* Blinking cursor while streaming */}
+                {!isUser && isStreaming && content && (
+                  <span className="inline-block w-2 h-4 ml-0.5 bg-gray-400 animate-pulse" />
+                )}
+              </>
+            )}
           </div>
 
           {timestamp && (

@@ -160,12 +160,13 @@ export async function sendChatCompletion(params: SendMessageParams): Promise<{
  * Stream chat completion via proxy.
  * Uses user's stored API key from database.
  * Supports thinking/reasoning content from models like DeepSeek-R1.
+ * Uses batched updates for smooth streaming display.
  */
 export async function streamChatCompletion(
   params: SendMessageParams,
-  onChunk: (content: string) => void,
+  onChunk: (content: string, fullContent: string) => void,
   onComplete?: (dycpStats: DYCPStats) => void,
-  onThinking?: (thinking: string) => void
+  onThinking?: (thinking: string, fullThinking: string) => void
 ): Promise<void> {
   const res = await fetch(`${API_BASE}/v1/chat/completions`, {
     method: "POST",
@@ -198,6 +199,32 @@ export async function streamChatCompletion(
   }
 
   let buffer = "";
+  
+  // Accumulated content for batched updates
+  let accumulatedContent = "";
+  let accumulatedThinking = "";
+  let pendingContentUpdate = "";
+  let pendingThinkingUpdate = "";
+  let rafId: number | null = null;
+  
+  // Flush pending updates via requestAnimationFrame for smooth rendering
+  const flushUpdates = () => {
+    if (pendingContentUpdate) {
+      onChunk(pendingContentUpdate, accumulatedContent);
+      pendingContentUpdate = "";
+    }
+    if (pendingThinkingUpdate && onThinking) {
+      onThinking(pendingThinkingUpdate, accumulatedThinking);
+      pendingThinkingUpdate = "";
+    }
+    rafId = null;
+  };
+  
+  const scheduleUpdate = () => {
+    if (rafId === null) {
+      rafId = requestAnimationFrame(flushUpdates);
+    }
+  };
 
   try {
     while (true) {
@@ -229,16 +256,19 @@ export async function streamChatCompletion(
             
             const content = data.choices?.[0]?.delta?.content;
             if (content) {
-              onChunk(content);
+              accumulatedContent += content;
+              pendingContentUpdate += content;
+              scheduleUpdate();
             }
             
             // Handle thinking/reasoning content (DeepSeek, Ollama, etc.)
-            // Different providers use different field names
             const reasoningContent = 
               data.choices?.[0]?.delta?.reasoning_content ||  // DeepSeek
               data.choices?.[0]?.delta?.reasoning;            // Ollama (qwen3, etc.)
             if (reasoningContent && onThinking) {
-              onThinking(reasoningContent);
+              accumulatedThinking += reasoningContent;
+              pendingThinkingUpdate += reasoningContent;
+              scheduleUpdate();
             }
           } catch (e) {
             // Skip invalid JSON chunks
@@ -255,11 +285,23 @@ export async function streamChatCompletion(
         const data = JSON.parse(buffer.trim().slice(6));
         const content = data.choices?.[0]?.delta?.content;
         if (content) {
-          onChunk(content);
+          accumulatedContent += content;
+          pendingContentUpdate += content;
         }
       } catch {
         // Ignore final incomplete chunk
       }
+    }
+    
+    // Final flush - ensure all pending updates are sent
+    if (rafId !== null) {
+      cancelAnimationFrame(rafId);
+    }
+    if (pendingContentUpdate) {
+      onChunk(pendingContentUpdate, accumulatedContent);
+    }
+    if (pendingThinkingUpdate && onThinking) {
+      onThinking(pendingThinkingUpdate, accumulatedThinking);
     }
   } finally {
     reader.releaseLock();

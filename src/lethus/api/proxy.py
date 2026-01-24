@@ -649,8 +649,10 @@ async def chat_completions(request: Request, db: Session = Depends(get_db)):
             ),
             media_type="text/event-stream",
             headers={
-                "Cache-Control": "no-cache",
+                "Cache-Control": "no-cache, no-transform",
                 "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",  # Disable NGINX buffering
+                "Transfer-Encoding": "chunked",
                 **dycp_headers
             }
         )

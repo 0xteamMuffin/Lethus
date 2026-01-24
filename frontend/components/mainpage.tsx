@@ -290,12 +290,13 @@ const LibreChatInterface: React.FC<LibreChatInterfaceProps> = ({
           conversationId: currentConvId,
           enhancedMode: enhancedMode,
         },
-        (chunk) => {
-          streamingMessageRef.current += chunk;
+        (_chunk, fullContent) => {
+          // Use the full accumulated content directly for smoother updates
+          streamingMessageRef.current = fullContent;
           setMessages((prev) =>
             prev.map((msg) =>
               msg.id === aiMessageId
-                ? { ...msg, content: streamingMessageRef.current, thinking: streamingThinkingRef.current || undefined }
+                ? { ...msg, content: fullContent, thinking: streamingThinkingRef.current || undefined }
                 : msg,
             ),
           );
@@ -325,12 +326,13 @@ const LibreChatInterface: React.FC<LibreChatInterfaceProps> = ({
             );
           }
         },
-        (thinking) => {
-          streamingThinkingRef.current += thinking;
+        (_chunk, fullThinking) => {
+          // Use the full accumulated thinking directly for smoother updates
+          streamingThinkingRef.current = fullThinking;
           setMessages((prev) =>
             prev.map((msg) =>
               msg.id === aiMessageId
-                ? { ...msg, thinking: streamingThinkingRef.current }
+                ? { ...msg, thinking: fullThinking }
                 : msg,
             ),
           );
