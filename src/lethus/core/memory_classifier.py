@@ -4,6 +4,8 @@ Transforms raw DYCP spans into actionable memory categories.
 """
 import json
 from typing import List, Dict, Optional
+
+from ..config import settings
 from dataclasses import dataclass
 from enum import Enum
 
@@ -160,7 +162,7 @@ class MemoryClassifier:
         
         try:
             from openai import OpenAI
-            client = OpenAI(api_key=api_key)
+            client = OpenAI(api_key=api_key, base_url=settings.openai_base_url)
             
             response = client.chat.completions.create(
                 model="gpt-4o-mini",

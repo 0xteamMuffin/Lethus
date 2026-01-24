@@ -39,6 +39,7 @@ class Settings(BaseSettings):
     openai_embedding_model: str = "text-embedding-3-small"
     openai_embedding_dim: int = 1536
     openai_api_key: Optional[str] = None
+    openai_base_url: str = "https://api.openai.com/v1"
     
     # === DYCP Algorithm (from paper Section 5.4) ===
     # Note: Lower tau (0.3) and higher theta (1.5) may improve recall
@@ -64,7 +65,7 @@ class Settings(BaseSettings):
     confidence_threshold: float = 0.3
     
     # === LLM (for REST API) ===
-    llm_model: str = "gpt-4o-mini"
+    llm_model: str = "openai/gpt-4o-mini"
     llm_temperature: float = 0.7
     llm_max_tokens: int = 1000
     

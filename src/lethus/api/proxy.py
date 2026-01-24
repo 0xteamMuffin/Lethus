@@ -26,17 +26,18 @@ router = APIRouter()
 _components = {}
 
 
-def _get_components(api_key: str = None):
+def _get_components(api_key: str = None, embedding_model: str = None):
     """Get or initialize components."""
     if "dycp" not in _components:
         _components["dycp"] = DYCPCore()
         _components["ghost_graphs"] = {}  # Per-conversation
         _components["milvus"] = get_milvus_storage()
     
-    # Embedding provider (may need API key)
-    key = "embeddings" if api_key is None else f"embeddings_{api_key[:8]}"
+    # Embedding provider (may need API key and model)
+    model_suffix = f"_{embedding_model}" if embedding_model else ""
+    key = "embeddings" if api_key is None else f"embeddings_{api_key[:8]}{model_suffix}"
     if key not in _components:
-        _components[key] = get_embedding_provider(api_key=api_key)
+        _components[key] = get_embedding_provider(api_key=api_key, model=embedding_model)
     
     return _components
 
@@ -83,8 +84,14 @@ from .models import (
 def apply_dycp_reduction(
     messages: List[Dict],
     api_key: str,
+<<<<<<< HEAD
     conversation_id: int
 ) -> List[Dict]:
+=======
+    conversation_id: int,
+    embedding_model: str = None
+) -> tuple[List[Dict], DYCPStats]:
+>>>>>>> main
     """
     Apply DYCP to reduce message history to relevant spans only.
     
@@ -94,12 +101,17 @@ def apply_dycp_reduction(
         # Too short to prune - just pass through
         return messages
     
-    components = _get_components(api_key)
+    components = _get_components(api_key, embedding_model)
     dycp = components["dycp"]
+<<<<<<< HEAD
     milvus = components["milvus"]
     embeddings = components.get(f"embeddings_{api_key[:8]}" if api_key else "embeddings")
+=======
+    model_suffix = f"_{embedding_model}" if embedding_model else ""
+    embeddings = components.get(f"embeddings_{api_key[:8]}{model_suffix}" if api_key else "embeddings")
+>>>>>>> main
     if not embeddings:
-        embeddings = get_embedding_provider(api_key=api_key)
+        embeddings = get_embedding_provider(api_key=api_key, model=embedding_model)
     
     ghost_graph = _get_ghost_graph(conversation_id)
     
@@ -187,14 +199,16 @@ async def store_interaction(
     conversation_id: int,
     user_message: str,
     assistant_message: str,
-    api_key: str
+    api_key: str,
+    embedding_model: str = None
 ):
     """Store the conversation turn for future retrieval."""
-    components = _get_components(api_key)
+    components = _get_components(api_key, embedding_model)
     milvus = components["milvus"]
-    embeddings = components.get(f"embeddings_{api_key[:8]}" if api_key else "embeddings")
+    model_suffix = f"_{embedding_model}" if embedding_model else ""
+    embeddings = components.get(f"embeddings_{api_key[:8]}{model_suffix}" if api_key else "embeddings")
     if not embeddings:
-        embeddings = get_embedding_provider(api_key=api_key)
+        embeddings = get_embedding_provider(api_key=api_key, model=embedding_model)
     
     ghost_graph = _get_ghost_graph(conversation_id)
     
@@ -222,7 +236,8 @@ async def stream_and_capture(
     response: httpx.Response,
     conversation_id: int,
     user_message: str,
-    api_key: str
+    api_key: str,
+    embedding_model: str = None
 ) -> AsyncIterator[bytes]:
     """
     Stream response to client while capturing full content for storage.
@@ -252,7 +267,8 @@ async def stream_and_capture(
             conversation_id,
             user_message,
             assistant_message,
-            api_key
+            api_key,
+            embedding_model
         )
 
 
@@ -263,6 +279,18 @@ async def chat_completions(request: Request):
     """
     OpenAI-compatible chat completions endpoint.
     Applies DYCP context reduction before forwarding to LLM.
+<<<<<<< HEAD
+=======
+    
+    Accepts API key via:
+    1. Authorization header (Bearer token) - for standard OpenAI clients
+    2. user_id in request body - fetches API key from database
+    
+    Model selection:
+    - Uses model from request if specified
+    - Falls back to user's saved llm_model preference
+    - Falls back to env default (settings.llm_model)
+>>>>>>> main
     """
     # Get API key from header
     auth_header = request.headers.get("Authorization", "")
@@ -274,10 +302,51 @@ async def chat_completions(request: Request):
     # Parse request body
     body = await request.json()
     
+<<<<<<< HEAD
+=======
+    # Get API key and user settings from header or database
+    auth_header = request.headers.get("Authorization", "")
+    api_key = None
+    user_llm_model = None
+    user_embedding_model = None
+    
+    if auth_header.startswith("Bearer "):
+        # Standard OpenAI client with API key in header
+        api_key = auth_header[7:]  # Remove "Bearer "
+    elif "user_id" in body:
+        # Fetch API key and settings from database using user_id
+        user_id = body.get("user_id")
+        user = db.query(User).filter(User.user_id == user_id).first()
+        
+        if not user or not user.openai_api_key:
+            raise HTTPException(
+                status_code=400,
+                detail="No API key configured. Please set your OpenAI API key in settings."
+            )
+        
+        api_key = user.openai_api_key
+        user_llm_model = user.llm_model
+        user_embedding_model = user.embedding_model
+    else:
+        raise HTTPException(
+            status_code=401,
+            detail="Missing API key. Provide Authorization header or user_id in request body."
+        )
+    
+    # Parse and validate request
+>>>>>>> main
     try:
         chat_request = ChatCompletionRequest(**body)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Invalid request: {e}")
+    
+    # Determine which LLM model to use (request model > user setting > env default)
+    effective_llm_model = chat_request.model
+    if not effective_llm_model or effective_llm_model == "default":
+        effective_llm_model = user_llm_model or settings.llm_model
+    
+    # Determine which embedding model to use (user setting > env default)
+    effective_embedding_model = user_embedding_model or settings.openai_embedding_model
     
     # Convert to dicts for processing
     messages = [{"role": m.role, "content": m.content} for m in chat_request.messages]
@@ -292,8 +361,15 @@ async def chat_completions(request: Request):
             last_user_msg = m["content"]
             break
     
+<<<<<<< HEAD
     # Apply DYCP reduction
     reduced_messages = apply_dycp_reduction(messages, api_key, conversation_id)
+=======
+    # Apply DYCP reduction with user's embedding model
+    reduced_messages, stats = apply_dycp_reduction(
+        messages, api_key, conversation_id, effective_embedding_model
+    )
+>>>>>>> main
     
     # Log reduction stats
     original_count = len(messages)
@@ -301,12 +377,20 @@ async def chat_completions(request: Request):
     if original_count != reduced_count:
         print(f"[DYCP] Reduced {original_count} → {reduced_count} messages")
     
+<<<<<<< HEAD
     # Build forwarded request
     forward_body = body.copy()
     forward_body["messages"] = reduced_messages
+=======
+    # Build forwarded request - remove user_id, use effective model
+    forward_body = body.copy()
+    forward_body["messages"] = reduced_messages
+    forward_body["model"] = effective_llm_model
+    forward_body.pop("user_id", None)
+>>>>>>> main
     
     # Determine target URL based on model
-    model = chat_request.model.lower()
+    model = effective_llm_model.lower()
     if "claude" in model or "anthropic" in model:
         # Anthropic - would need different handling
         raise HTTPException(
@@ -315,7 +399,7 @@ async def chat_completions(request: Request):
         )
     else:
         # OpenAI (default)
-        target_url = "https://api.openai.com/v1/chat/completions"
+        target_url = f"{settings.openai_base_url}/chat/completions"
     
     # Forward request
     headers = {
@@ -323,6 +407,42 @@ async def chat_completions(request: Request):
         "Content-Type": "application/json"
     }
     
+<<<<<<< HEAD
+=======
+    # DYCP stats headers
+    dycp_headers = {
+        "X-Lethus-Original-Messages": str(stats.original_messages),
+        "X-Lethus-Reduced-Messages": str(stats.reduced_messages),
+        "X-Lethus-Original-Tokens": str(stats.original_tokens),
+        "X-Lethus-Reduced-Tokens": str(stats.reduced_tokens),
+        "X-Lethus-Tokens-Saved": str(stats.tokens_saved),
+        "X-Lethus-Reduction-Percent": f"{stats.reduction_percent:.1f}",
+        "X-Lethus-Spans-Found": str(stats.spans_found),
+        "X-Lethus-Processing-Ms": f"{stats.processing_time_ms:.2f}",
+    }
+    
+    if chat_request.stream:
+        # Streaming response - generator creates its own client
+        return StreamingResponse(
+            stream_and_capture(
+                target_url,
+                forward_body,
+                headers,
+                conversation_id,
+                last_user_msg,
+                api_key,
+                effective_embedding_model
+            ),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                **dycp_headers
+            }
+        )
+    
+    # Non-streaming response
+>>>>>>> main
     async with httpx.AsyncClient(timeout=120.0) as client:
         if chat_request.stream:
             # Streaming response
@@ -359,6 +479,7 @@ async def chat_completions(request: Request):
                 json=forward_body,
                 headers=headers
             )
+<<<<<<< HEAD
             
             if response.status_code != 200:
                 raise HTTPException(
@@ -379,6 +500,24 @@ async def chat_completions(request: Request):
                 )
             
             return result
+=======
+        
+        result = response.json()
+        
+        # Store interaction
+        if last_user_msg and result.get("choices"):
+            assistant_msg = result["choices"][0]["message"]["content"]
+            await store_interaction(
+                conversation_id,
+                last_user_msg,
+                assistant_msg,
+                api_key,
+                effective_embedding_model
+            )
+        
+        # Return with DYCP stats headers
+        return JSONResponse(content=result, headers=dycp_headers)
+>>>>>>> main
 
 
 @router.get("/models")
@@ -392,7 +531,7 @@ async def list_models(request: Request):
     
     async with httpx.AsyncClient() as client:
         response = await client.get(
-            "https://api.openai.com/v1/models",
+            f"{settings.openai_base_url}/models",
             headers={"Authorization": f"Bearer {api_key}"}
         )
         return response.json()
@@ -409,7 +548,7 @@ async def get_model(model_id: str, request: Request):
     
     async with httpx.AsyncClient() as client:
         response = await client.get(
-            f"https://api.openai.com/v1/models/{model_id}",
+            f"{settings.openai_base_url}/models/{model_id}",
             headers={"Authorization": f"Bearer {api_key}"}
         )
         return response.json()
