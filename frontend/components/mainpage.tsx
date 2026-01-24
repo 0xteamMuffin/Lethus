@@ -13,10 +13,19 @@ import {
   Settings
 } from "lucide-react";
 import { toast, Toaster } from "sonner";
-import { sendMessage, getConversationTurns, type Turn } from "@/api/message";
+import { 
+  streamChatCompletion, 
+  getConversationTurns, 
+  createConversation,
+  type Turn,
+  type ChatMessage as APIChatMessage,
+  type DYCPStats
+} from "@/api/message";
 import { getUserSettings } from "@/api/settings";
-import ChatMessage from "./ui/chat-message";
+import ChatMessageComponent from "./ui/chat-message";
 import SettingsModal from "./ui/settings-modal";
+
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 interface LibreChatInterfaceProps {
     onToggleSidebar?: () => void;
@@ -41,13 +50,16 @@ const LibreChatInterface: React.FC<LibreChatInterfaceProps> = ({
   const [message, setMessage] = useState<string>("");
   const [isSending, setIsSending] = useState<boolean>(false);
   const [messages, setMessages] = useState<Message[]>([]);
+  const [chatHistory, setChatHistory] = useState<APIChatMessage[]>([]);
   const [conversationId, setConversationId] = useState<number | undefined>(propConversationId);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [apiKey, setApiKey] = useState<string>("");
   const [hasApiKey, setHasApiKey] = useState<boolean>(false);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
+  const [lastDycpStats, setLastDycpStats] = useState<DYCPStats | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const streamingMessageRef = useRef<string>("");
 
   // Check if user has API key in backend on mount
   useEffect(() => {
@@ -60,12 +72,6 @@ const LibreChatInterface: React.FC<LibreChatInterfaceProps> = ({
         
         const settings = await getUserSettings(userId);
         setHasApiKey(settings.has_api_key);
-        
-        // Keep localStorage for backward compatibility
-        const savedApiKey = localStorage.getItem("openai_api_key");
-        if (savedApiKey) {
-          setApiKey(savedApiKey);
-        }
       } catch (error) {
         console.error('Failed to check API key:', error);
       }
@@ -82,6 +88,7 @@ const LibreChatInterface: React.FC<LibreChatInterfaceProps> = ({
         loadConversationHistory(propConversationId);
       } else {
         setMessages([]);
+        setChatHistory([]);
       }
     }
   }, [propConversationId]);
@@ -93,6 +100,8 @@ const LibreChatInterface: React.FC<LibreChatInterfaceProps> = ({
       const turns = await getConversationTurns(convId);
       
       const loadedMessages: Message[] = [];
+      const loadedChatHistory: APIChatMessage[] = [];
+      
       turns.forEach((turn: Turn) => {
         loadedMessages.push({
           id: `${turn.id}-user`,
@@ -112,9 +121,13 @@ const LibreChatInterface: React.FC<LibreChatInterfaceProps> = ({
             minute: "2-digit",
           })
         });
+        
+        loadedChatHistory.push({ role: "user", content: turn.user_message });
+        loadedChatHistory.push({ role: "assistant", content: turn.assistant_message });
       });
       
       setMessages(loadedMessages);
+      setChatHistory(loadedChatHistory);
     } catch (error) {
       console.error('Failed to load conversation history:', error);
       toast.error("Failed to load conversation history");
@@ -135,13 +148,9 @@ const LibreChatInterface: React.FC<LibreChatInterfaceProps> = ({
     return userId;
   };
 
-  // Save API key (now handled by SettingsModal)
   const handleSaveApiKey = (newApiKey: string) => {
     setApiKey(newApiKey);
     setHasApiKey(true);
-    if (typeof window !== 'undefined') {
-      localStorage.setItem("openai_api_key", newApiKey);
-    }
   };
 
   const scrollToBottom = () => {
@@ -160,10 +169,26 @@ const LibreChatInterface: React.FC<LibreChatInterfaceProps> = ({
     }
   };
 
+  // Store turn in database
+  const storeTurn = async (convId: number, turnNumber: number, userMsg: string, assistantMsg: string) => {
+    try {
+      await fetch(`${API_BASE}/api/conversations/${convId}/turns`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          turn_number: turnNumber,
+          user_message: userMsg,
+          assistant_message: assistantMsg,
+        }),
+      });
+    } catch (error) {
+      console.error('Failed to store turn:', error);
+    }
+  };
+
   const handleSendMessage = async () => {
     if (!message.trim() || isSending) return;
 
-    // Check for API key
     if (!hasApiKey) {
       toast.error("Please configure your OpenAI API key in settings");
       setIsSettingsOpen(true);
@@ -171,6 +196,7 @@ const LibreChatInterface: React.FC<LibreChatInterfaceProps> = ({
     }
 
     setIsSending(true);
+    streamingMessageRef.current = "";
 
     const userMessage: Message = {
       id: Date.now().toString(),
@@ -182,7 +208,23 @@ const LibreChatInterface: React.FC<LibreChatInterfaceProps> = ({
       }),
     };
 
-    setMessages((prev) => [...prev, userMessage]);
+    const aiMessageId = (Date.now() + 1).toString();
+    const aiMessage: Message = {
+      id: aiMessageId,
+      content: "",
+      sender: "ai",
+      timestamp: new Date().toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
+      }),
+    };
+
+    setMessages((prev) => [...prev, userMessage, aiMessage]);
+    
+    const newUserMessage: APIChatMessage = { role: "user", content: message };
+    const updatedHistory = [...chatHistory, newUserMessage];
+    setChatHistory(updatedHistory);
+    
     const messageToSend = message;
     setMessage("");
     if (textareaRef.current) {
@@ -190,34 +232,59 @@ const LibreChatInterface: React.FC<LibreChatInterfaceProps> = ({
     }
 
     try {
-      const response = await sendMessage({
-        userId: getUserId(),
-        message: messageToSend,
-        conversationId: conversationId,
-      });
-      
-      // Set conversation ID if this is the first message
-      if (!conversationId && response.conversation_id) {
-        setConversationId(response.conversation_id);
-        if (onConversationCreated) {
-          onConversationCreated(response.conversation_id);
-        }
+      // Create conversation if this is the first message
+      let currentConvId = conversationId;
+      if (!currentConvId) {
+        const conv = await createConversation(getUserId(), messageToSend.slice(0, 50));
+        currentConvId = conv.id;
+        setConversationId(currentConvId);
+        onConversationCreated?.(currentConvId);
       }
-      
-      const aiMessage: Message = {
-        id: (Date.now() + 1).toString(),
-        content: response.message,
-        sender: "ai",
-        timestamp: new Date().toLocaleTimeString([], {
-          hour: "2-digit",
-          minute: "2-digit",
-        }),
+
+      await streamChatCompletion(
+        {
+          messages: updatedHistory,
+          userId: getUserId(),
+          model: "gpt-4o-mini",
+          stream: true,
+        },
+        (chunk) => {
+          streamingMessageRef.current += chunk;
+          setMessages((prev) =>
+            prev.map((msg) =>
+              msg.id === aiMessageId
+                ? { ...msg, content: streamingMessageRef.current }
+                : msg
+            )
+          );
+        },
+        (stats) => {
+          setLastDycpStats(stats);
+          if (stats.tokensSaved > 0) {
+            toast.success(`DYCP saved ~${stats.tokensSaved.toLocaleString()} tokens`);
+          }
+        }
+      );
+
+      // Update chat history with assistant response
+      const assistantMessage: APIChatMessage = { 
+        role: "assistant", 
+        content: streamingMessageRef.current 
       };
-      setMessages((prev) => [...prev, aiMessage]);
-      toast.success("Message received!");
+      setChatHistory([...updatedHistory, assistantMessage]);
+
+      // Store turn in database
+      const turnNumber = Math.floor(chatHistory.length / 2) + 1;
+      await storeTurn(currentConvId!, turnNumber, messageToSend, streamingMessageRef.current);
+
     } catch (error) {
       console.error(error);
-      toast.error("Failed to get response");
+      const errorMsg = error instanceof Error ? error.message : "Failed to get response";
+      toast.error(errorMsg);
+      
+      // Remove the empty AI message on error
+      setMessages((prev) => prev.filter((msg) => msg.id !== aiMessageId));
+      setChatHistory(updatedHistory.slice(0, -1));
     } finally {
       setIsSending(false);
     }
@@ -309,7 +376,7 @@ const LibreChatInterface: React.FC<LibreChatInterfaceProps> = ({
         ) : (
           <div className="flex flex-col w-full items-center p-2 md:p-4 pb-0">
             {messages.map((msg) => (
-              <ChatMessage
+              <ChatMessageComponent
                 key={msg.id}
                 content={msg.content}
                 sender={msg.sender}
