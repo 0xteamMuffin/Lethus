@@ -59,11 +59,28 @@ class MemorySpan(BaseModel):
     relevance_score: float
 
 
+class ClassifiedMemory(BaseModel):
+    """A classified memory item"""
+    content: str
+    relevance: float = 1.0
+    role: Optional[str] = None
+    span_label: Optional[str] = None
+
+
+class ClassifiedMemories(BaseModel):
+    """Structured memory categories"""
+    rules: List[ClassifiedMemory] = []      # User preferences, constraints
+    facts: List[ClassifiedMemory] = []      # Stated information
+    experiences: List[ClassifiedMemory] = [] # Past interactions
+    entities: List[Dict[str, str]] = []     # Named entities
+
+
 class RetrievalResult(BaseModel):
     """Result from memory retrieval"""
     pinned_memories: List[Dict[str, Any]]
     spans: List[MemorySpan]
     confidence: Dict[str, Any]
+    classified: Optional[ClassifiedMemories] = None  # Structured memory types
 
 
 class MessageResponse(BaseModel):

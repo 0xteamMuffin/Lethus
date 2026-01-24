@@ -2,8 +2,14 @@
 Lethus configuration.
 Supports both MCP and REST API modes.
 """
+import os
+from pathlib import Path
 from pydantic_settings import BaseSettings
 from typing import List, Literal, Optional
+
+# Compute project root (.env location) relative to this config file
+_PROJECT_ROOT = Path(__file__).parent.parent.parent
+_ENV_FILE = _PROJECT_ROOT / ".env"
 
 
 class Settings(BaseSettings):
@@ -81,7 +87,7 @@ class Settings(BaseSettings):
         return [origin.strip() for origin in self.cors_origins.split(",")]
     
     class Config:
-        env_file = ".env"
+        env_file = str(_ENV_FILE)
         env_prefix = "LETHUS_"
 
 

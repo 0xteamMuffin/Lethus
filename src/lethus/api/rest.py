@@ -17,6 +17,7 @@ from ..core.dycp import DYCPCore
 from ..core.ghost_graph import GhostGraph
 from ..core.prefetch import PrefetchCache, Prefetcher
 from ..core.embeddings import get_embedding_provider
+from ..core.memory_classifier import MemoryClassifier
 from .models import (
     MessageRequest,
     MessageResponse,
@@ -37,6 +38,7 @@ def _get_components(api_key: str = None):
         _components["ghost_graphs"] = {}  # Per-conversation ghost graphs
         _components["prefetch_cache"] = PrefetchCache()
         _components["milvus"] = get_milvus_storage()
+        _components["memory_classifier"] = MemoryClassifier()
     
     # Get embedding provider (may need API key)
     key = "embeddings" if api_key is None else f"embeddings_{api_key[:8]}"
@@ -296,12 +298,12 @@ async def send_message(
                 "relevance_score": float(avg_sim)
             })
         
-        # Calculate confidence
+        # Calculate confidence (clamp to 1.0 max since boosting can exceed 1.0)
         if spans:
-            max_sim = max(similarities)
+            max_sim = min(1.0, float(max(similarities)))
             confidence = {
                 "confident": bool(max_sim > settings.confidence_threshold),
-                "score": float(max_sim)
+                "score": max_sim
             }
     
     # Get pinned memories
@@ -385,6 +387,10 @@ async def send_message(
         entities=json.dumps(entity_names)
     )
     
+    # Classify memories into structured types (rules, facts, experiences)
+    classifier = components["memory_classifier"]
+    classified = classifier.classify_spans(retrieved_spans, entity_names)
+    
     return MessageResponse(
         conversation_id=conversation_id,
         turn_id=turn.id,
@@ -392,7 +398,8 @@ async def send_message(
         retrieved_context={
             "spans": retrieved_spans,
             "pinned_memories": pinned_memories,
-            "confidence": confidence
+            "confidence": confidence,
+            "classified": classified
         },
         metadata={
             "turn_number": turn_number,
