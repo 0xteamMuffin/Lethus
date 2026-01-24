@@ -1,4 +1,4 @@
-services:
+﻿services:
   postgres:
     container_name: lethus-postgres
     image: postgres:latest
@@ -9,7 +9,7 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - ${DOCKER_VOLUME_DIRECTORY:-.}/volumes/postgres:/var/lib/postgresql/data
+      - ${DOCKER_VOLUME_DIRECTORY:-.}/volumes/postgres:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d lethus_db"]
       interval: 30s
