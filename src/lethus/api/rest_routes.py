@@ -160,12 +160,20 @@ async def get_user_settings(user_id: str, db: Session = Depends(get_db)):
 
 @router.post("/settings/validate-api-key", response_model=ValidateApiKeyResponse)
 async def validate_api_key(request: ValidateApiKeyRequest):
-    """Validate an OpenAI API key by making a test request"""
+    """Validate an API key by making a minimal chat completion request"""
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            response = await client.get(
-                f"{settings.openai_base_url}/models",
-                headers={"Authorization": f"Bearer {request.api_key}"}
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                f"{settings.openai_base_url}/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {request.api_key}",
+                    "Content-Type": "application/json"
+                },
+                json={
+                    "model": settings.llm_model,
+                    "messages": [{"role": "user", "content": "Hi"}],
+                    "max_tokens": 1
+                }
             )
             
             if response.status_code == 200:
@@ -185,70 +193,53 @@ async def validate_api_key(request: ValidateApiKeyRequest):
 
 @router.get("/settings/{user_id}/models", response_model=AvailableModelsResponse)
 async def get_available_models(user_id: str, db: Session = Depends(get_db)):
-    """Fetch available models from OpenAI using the user's API key"""
+    """
+    Try to fetch available models from the API.
+    Falls back to empty lists if API doesn't support /models endpoint.
+    """
     user = db.query(User).filter(User.user_id == user_id).first()
     
     if not user or not user.openai_api_key:
-        raise HTTPException(
-            status_code=400,
-            detail="No API key configured. Please set your OpenAI API key first."
-        )
+        return AvailableModelsResponse(llm_models=[], embedding_models=[])
+    
+    base_url = settings.openai_base_url.rstrip("/")
     
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with httpx.AsyncClient(timeout=10.0) as client:
             response = await client.get(
-                f"{settings.openai_base_url}/models",
-                headers={"Authorization": f"Bearer {user.openai_api_key}"}
+                f"{base_url}/models",
+                headers={
+                    "Authorization": f"Bearer {user.openai_api_key}",
+                    "Content-Type": "application/json"
+                }
             )
             
-            if response.status_code != 200:
-                raise HTTPException(
-                    status_code=response.status_code,
-                    detail=f"Failed to fetch models: {response.text}"
-                )
-            
-            data = response.json()
-            models = data.get("data", [])
-            
-            # Categorize models
-            llm_models = []
-            embedding_models = []
-            
-            # Known model patterns
-            llm_patterns = ["gpt-", "o1-", "o3-", "chatgpt-"]
-            embedding_patterns = ["embedding", "embed"]
-            
-            for model in models:
-                model_id = model.get("id", "")
-                model_info = ModelInfo(
-                    id=model_id,
-                    object=model.get("object", "model"),
-                    owned_by=model.get("owned_by", "openai"),
-                    created=model.get("created")
-                )
+            if response.status_code == 200:
+                data = response.json()
+                models_data = data.get("data", [])
                 
-                # Check if it's an embedding model
-                if any(pattern in model_id.lower() for pattern in embedding_patterns):
-                    embedding_models.append(model_info)
-                # Check if it's an LLM model
-                elif any(pattern in model_id.lower() for pattern in llm_patterns):
-                    llm_models.append(model_info)
-            
-            # Sort models by ID for consistency
-            llm_models.sort(key=lambda x: x.id)
-            embedding_models.sort(key=lambda x: x.id)
-            
-            return AvailableModelsResponse(
-                llm_models=llm_models,
-                embedding_models=embedding_models
-            )
-            
-    except httpx.TimeoutException:
-        raise HTTPException(status_code=504, detail="Request to OpenAI timed out")
-    except HTTPException:
-        raise
+                llm_models = []
+                embedding_models = []
+                
+                for model in models_data:
+                    model_id = model.get("id", "")
+                    # Categorize models based on common naming patterns
+                    if "embed" in model_id.lower():
+                        embedding_models.append(model_id)
+                    else:
+                        llm_models.append(model_id)
+                
+                return AvailableModelsResponse(
+                    llm_models=sorted(llm_models),
+                    embedding_models=sorted(embedding_models)
+                )
+            else:
+                # API doesn't support /models - return empty lists
+                return AvailableModelsResponse(llm_models=[], embedding_models=[])
+                
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        # Any error - just return empty, user can type custom model names
+        return AvailableModelsResponse(llm_models=[], embedding_models=[])
 
 
 @router.delete("/settings/{user_id}/api-key")

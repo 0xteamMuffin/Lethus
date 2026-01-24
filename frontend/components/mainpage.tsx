@@ -53,7 +53,6 @@ const LibreChatInterface: React.FC<LibreChatInterfaceProps> = ({
   const [chatHistory, setChatHistory] = useState<APIChatMessage[]>([]);
   const [conversationId, setConversationId] = useState<number | undefined>(propConversationId);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [apiKey, setApiKey] = useState<string>("");
   const [hasApiKey, setHasApiKey] = useState<boolean>(false);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const [lastDycpStats, setLastDycpStats] = useState<DYCPStats | null>(null);
@@ -147,11 +146,6 @@ const LibreChatInterface: React.FC<LibreChatInterfaceProps> = ({
       localStorage.setItem('user_id', userId);
     }
     return userId;
-  };
-
-  const handleSaveApiKey = (newApiKey: string) => {
-    setApiKey(newApiKey);
-    setHasApiKey(true);
   };
 
   const scrollToBottom = () => {
@@ -306,8 +300,7 @@ const LibreChatInterface: React.FC<LibreChatInterfaceProps> = ({
       <Toaster position="top-center" theme="dark" />      <SettingsModal
         isOpen={isSettingsOpen}
         onClose={() => setIsSettingsOpen(false)}
-        onSave={handleSaveApiKey}
-        currentApiKey={apiKey}
+        onSave={(hasKey) => setHasApiKey(hasKey)}
         userId={getUserId()}
       />
       <header className="flex justify-between items-center px-4 md:px-6 py-3 md:py-4 text-gray-400 border-b border-[#2a2a2a] bg-[#0a0a0a] z-10 shrink-0">
