@@ -300,7 +300,7 @@ async def send_message(
         if spans:
             max_sim = max(similarities)
             confidence = {
-                "confident": max_sim > settings.confidence_threshold,
+                "confident": bool(max_sim > settings.confidence_threshold),
                 "score": float(max_sim)
             }
     

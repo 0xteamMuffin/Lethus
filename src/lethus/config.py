@@ -38,15 +38,17 @@ class Settings(BaseSettings):
     openai_api_key: Optional[str] = None
     
     # === DYCP Algorithm (from paper Section 5.4) ===
-    dycp_tau: float = 0.6  # Gain threshold
-    dycp_theta: float = 1.0  # Stopping threshold
+    # Note: Lower tau (0.3) and higher theta (1.5) may improve recall
+    dycp_tau: float = 0.6  # Gain threshold - turns need z-score > tau to have positive gain
+    dycp_theta: float = 1.0  # Stopping threshold - terminate span if drop from peak > theta
     
     # === Semantic Decay ===
-    decay_lambda: float = 0.98  # 2% decay per turn
+    decay_lambda: float = 0.98  # 2% decay per turn - older turns need higher relevance
     
     # === Ghost Graph ===
-    use_spacy: bool = True
-    ghost_graph_boost: float = 1.2  # 20% boost for entity-linked turns
+    use_spacy: bool = True  # REQUIRED for proper entity extraction
+    ghost_graph_boost: float = 1.5  # Multiplicative boost for entity-linked turns
+    ghost_graph_additive_boost: float = 0.35  # Additive boost per semantic type match
     
     # === Prefetch Cache ===
     prefetch_enabled: bool = True

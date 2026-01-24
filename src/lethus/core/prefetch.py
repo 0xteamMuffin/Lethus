@@ -100,27 +100,67 @@ class Prefetcher:
     
     def _default_predictions(self, last_query: str, last_response: str) -> List[str]:
         """
-        Simple heuristic predictions for follow-up queries.
+        Smarter follow-up predictions based on query structure and entities.
         """
         predictions = []
         
-        # Common follow-up patterns
-        words = last_query.split()
-        if words:
-            predictions.append(f"What do you mean by {words[-1]}?")
+        # Extract key terms from the query and response
+        query_lower = last_query.lower()
         
-        predictions.extend([
-            "Can you explain more?",
-            "Show me an example",
-        ])
+        # Pattern 1: If query was about "how", predict "why" and "what if"
+        if query_lower.startswith(("how do", "how to", "how can")):
+            predictions.append(last_query.replace("how", "why", 1))
+            predictions.append("What if that doesn't work?")
         
-        # Extract potential entities from response
-        response_words = last_response.split()
-        capitalized = [w for w in response_words if w and w[0].isupper() and len(w) > 3]
-        for word in capitalized[:2]:
-            predictions.append(f"Tell me more about {word}")
+        # Pattern 2: If query was about "what is", predict usage questions
+        if query_lower.startswith(("what is", "what's", "what are")):
+            topic = last_query.split(maxsplit=2)[-1].rstrip("?")
+            predictions.append(f"How do I use {topic}?")
+            predictions.append(f"Show me an example of {topic}")
         
-        return predictions[:3]
+        # Pattern 3: Extract entities from response for entity-based predictions
+        try:
+            from .ghost_graph import GhostGraph
+            ghost = GhostGraph(use_spacy=True)
+            entities = ghost.extract_entities(last_response)
+            
+            # Filter to meaningful entities (PERSON, ORG, PRODUCT, CONFIG, etc.)
+            important_types = {"PERSON", "ORG", "PRODUCT", "CONFIG", "FUNCTION", "GPE"}
+            important_entities = [e for e in entities if e["type"] in important_types]
+            
+            for ent in important_entities[:3]:
+                name = ent["name"]
+                if name.lower() not in query_lower:  # Don't repeat what was asked
+                    predictions.append(f"Tell me more about {name}")
+                    predictions.append(f"What is {name}?")
+        except Exception:
+            # Fall back to simple capitalized word extraction
+            response_words = last_response.split()
+            capitalized = [w.strip(".,!?") for w in response_words 
+                          if w and w[0].isupper() and len(w) > 3 and w.lower() not in query_lower]
+            for word in capitalized[:2]:
+                predictions.append(f"What is {word}?")
+        
+        # Pattern 4: Context continuation patterns
+        if "database" in query_lower or "db" in query_lower:
+            predictions.extend(["What's the database connection string?", "How do I connect to the database?"])
+        if "api" in query_lower:
+            predictions.extend(["What endpoints are available?", "How do I authenticate?"])
+        if "error" in query_lower or "bug" in query_lower:
+            predictions.extend(["How do I fix it?", "What's causing this?"])
+        if "deploy" in query_lower:
+            predictions.extend(["What are the deployment steps?", "What environment variables do I need?"])
+        
+        # Deduplicate and limit
+        seen = set()
+        unique = []
+        for p in predictions:
+            p_lower = p.lower()
+            if p_lower not in seen:
+                seen.add(p_lower)
+                unique.append(p)
+        
+        return unique[:5]
     
     async def trigger_prefetch(self, last_query: str, last_response: str):
         """
