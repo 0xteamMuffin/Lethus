@@ -26,6 +26,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
   userId,
 }) => {
   const [apiKey, setApiKey] = useState("");
+  const [baseUrl, setBaseUrl] = useState("");
   const [showKey, setShowKey] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isValidating, setIsValidating] = useState(false);
@@ -34,7 +35,10 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
   // Settings state
   const [settings, setSettings] = useState<UserSettings | null>(null);
   const [llmModel, setLlmModel] = useState<string>("");
+  const [llmTemperature, setLlmTemperature] = useState<string>("");
+  const [llmMaxTokens, setLlmMaxTokens] = useState<string>("");
   const [embeddingModel, setEmbeddingModel] = useState<string>("");
+  const [embeddingDim, setEmbeddingDim] = useState<string>("");
   const [availableModels, setAvailableModels] = useState<AvailableModels | null>(null);
   
   // Validation state
@@ -52,8 +56,12 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
     try {
       const userSettings = await getUserSettings(userId);
       setSettings(userSettings);
+      setBaseUrl(userSettings.openai_base_url || "");
       setLlmModel(userSettings.llm_model || "");
+      setLlmTemperature(userSettings.llm_temperature?.toString() || "");
+      setLlmMaxTokens(userSettings.llm_max_tokens?.toString() || "");
       setEmbeddingModel(userSettings.embedding_model || "");
+      setEmbeddingDim(userSettings.embedding_dim?.toString() || "");
       
       // Try to fetch available models if user has API key
       if (userSettings.has_api_key) {
@@ -82,7 +90,10 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
     setValidationError(null);
     
     try {
-      const result = await validateApiKey(apiKey.trim());
+      // Pass base_url and model if user entered them, otherwise use saved settings or let backend use defaults
+      const effectiveBaseUrl = baseUrl.trim() || settings?.openai_base_url || undefined;
+      const effectiveModel = llmModel.trim() || settings?.llm_model || undefined;
+      const result = await validateApiKey(apiKey.trim(), effectiveBaseUrl, effectiveModel);
       setApiKeyValid(result.valid);
       if (!result.valid) {
         setValidationError(result.error || "Invalid API key");
@@ -109,16 +120,18 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
       const result = await saveUserSettings({
         userId: userId,
         openaiApiKey: apiKey.trim(),
+        openaiBaseUrl: baseUrl.trim() || "",
       });
       
       setSettings(result);
       setApiKey("");
+      setBaseUrl(result.openai_base_url || "");
       setApiKeyValid(null);
-      toast.success("API key saved successfully!");
+      toast.success("API settings saved successfully!");
       onSave(true);
     } catch (error) {
-      console.error("Failed to save API key:", error);
-      toast.error("Failed to save API key");
+      console.error("Failed to save API settings:", error);
+      toast.error("Failed to save API settings");
     } finally {
       setIsSaving(false);
     }
@@ -129,15 +142,19 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
     try {
       const result = await saveUserSettings({
         userId: userId,
+        openaiBaseUrl: baseUrl || "",
         llmModel: llmModel || "",
+        llmTemperature: llmTemperature ? parseFloat(llmTemperature) : null,
+        llmMaxTokens: llmMaxTokens ? parseInt(llmMaxTokens, 10) : null,
         embeddingModel: embeddingModel || "",
+        embeddingDim: embeddingDim ? parseInt(embeddingDim, 10) : null,
       });
       
       setSettings(result);
-      toast.success("Model preferences saved!");
+      toast.success("Preferences saved!");
     } catch (error) {
-      console.error("Failed to save models:", error);
-      toast.error("Failed to save model preferences");
+      console.error("Failed to save preferences:", error);
+      toast.error("Failed to save preferences");
     } finally {
       setIsSaving(false);
     }
@@ -197,9 +214,9 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
 
           {/* Content */}
           <div className="px-6 py-6 space-y-6">
-            {/* API Key Section */}
+            {/* API Configuration Section */}
             <div className="space-y-4">
-              <h3 className="text-sm font-semibold text-white">OpenAI API Key</h3>
+              <h3 className="text-sm font-semibold text-white">OpenAI API Configuration</h3>
               
               {settings?.has_api_key ? (
                 <div className="space-y-3">
@@ -256,29 +273,52 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
                 </div>
               ) : (
                 <div className="space-y-3">
-                  <div className="relative">
+                  {/* Base URL (shown first when no API key) */}
+                  <div>
+                    <label className="block text-xs text-gray-400 mb-2">
+                      API Base URL (optional)
+                    </label>
                     <input
-                      type={showKey ? "text" : "password"}
-                      value={apiKey}
-                      onChange={(e) => {
-                        setApiKey(e.target.value);
-                        setApiKeyValid(null);
-                        setValidationError(null);
-                      }}
-                      placeholder="sk-..."
-                      className={`w-full bg-[#121212] border rounded-xl px-4 py-3 text-white placeholder-gray-600 focus:outline-none transition-all ${
-                        apiKeyValid === true ? "border-green-500" : 
-                        apiKeyValid === false ? "border-red-500" : 
-                        "border-[#2a2a2a] focus:border-[#404040]"
-                      }`}
+                      type="text"
+                      value={baseUrl}
+                      onChange={(e) => setBaseUrl(e.target.value)}
+                      placeholder={settings?.default_openai_base_url || "https://api.openai.com/v1"}
+                      className="w-full bg-[#121212] border border-[#2a2a2a] rounded-xl px-4 py-3 text-sm text-white placeholder-gray-600 focus:border-[#404040] focus:outline-none transition-all"
                     />
-                    <button
-                      type="button"
-                      onClick={() => setShowKey(!showKey)}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-gray-500 hover:text-gray-300 transition-colors"
-                    >
-                      {showKey ? "Hide" : "Show"}
-                    </button>
+                    <p className="mt-1 text-xs text-gray-600">
+                      For OpenAI-compatible APIs (e.g., GitHub Models, Azure)
+                    </p>
+                  </div>
+                  
+                  {/* API Key */}
+                  <div>
+                    <label className="block text-xs text-gray-400 mb-2">
+                      API Key
+                    </label>
+                    <div className="relative">
+                      <input
+                        type={showKey ? "text" : "password"}
+                        value={apiKey}
+                        onChange={(e) => {
+                          setApiKey(e.target.value);
+                          setApiKeyValid(null);
+                          setValidationError(null);
+                        }}
+                        placeholder="sk-..."
+                        className={`w-full bg-[#121212] border rounded-xl px-4 py-3 text-white placeholder-gray-600 focus:outline-none transition-all ${
+                          apiKeyValid === true ? "border-green-500" : 
+                          apiKeyValid === false ? "border-red-500" : 
+                          "border-[#2a2a2a] focus:border-[#404040]"
+                        }`}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowKey(!showKey)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-gray-500 hover:text-gray-300 transition-colors"
+                      >
+                        {showKey ? "Hide" : "Show"}
+                      </button>
+                    </div>
                   </div>
                   
                   {validationError && (
@@ -318,7 +358,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
                           <Loader2 size={14} className="animate-spin" />
                           Saving...
                         </span>
-                      ) : "Save Key"}
+                      ) : "Save"}
                     </button>
                   </div>
                   
@@ -335,9 +375,26 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
             {/* Model Selection Section */}
             {settings?.has_api_key && (
               <div className="space-y-4 pt-4 border-t border-[#2a2a2a]">
-                <h3 className="text-sm font-semibold text-white">Model Preferences</h3>
+                <h3 className="text-sm font-semibold text-white">Preferences</h3>
                 
                 <div className="space-y-4">
+                  {/* Base URL */}
+                  <div>
+                    <label className="block text-xs text-gray-400 mb-2">
+                      API Base URL
+                    </label>
+                    <input
+                      type="text"
+                      value={baseUrl}
+                      onChange={(e) => setBaseUrl(e.target.value)}
+                      placeholder={settings?.default_openai_base_url || "https://api.openai.com/v1"}
+                      className="w-full bg-[#121212] border border-[#2a2a2a] rounded-xl px-4 py-3 text-sm text-white placeholder-gray-600 focus:border-[#404040] focus:outline-none transition-all"
+                    />
+                    <p className="mt-1 text-xs text-gray-600">
+                      Default: {settings?.default_openai_base_url}
+                    </p>
+                  </div>
+                  
                   {/* LLM Model */}
                   <div>
                     <label className="block text-xs text-gray-400 mb-2">
@@ -348,7 +405,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
                       list="llm-models-list"
                       value={llmModel}
                       onChange={(e) => setLlmModel(e.target.value)}
-                      placeholder={settings?.default_llm_model || "e.g., gpt-4o-mini"}
+                      placeholder={settings?.default_llm_model || "e.g., openai/gpt-4o-mini"}
                       className="w-full bg-[#121212] border border-[#2a2a2a] rounded-xl px-4 py-3 text-sm text-white placeholder-gray-600 focus:border-[#404040] focus:outline-none transition-all"
                     />
                     <datalist id="llm-models-list">
@@ -358,8 +415,46 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
                     </datalist>
                     <p className="mt-1 text-xs text-gray-600">
                       Default: {settings?.default_llm_model}
-                      {availableModels?.llm_models.length ? " (suggestions available)" : ""}
                     </p>
+                  </div>
+                  
+                  {/* Temperature and Max Tokens row */}
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs text-gray-400 mb-2">
+                        Temperature
+                      </label>
+                      <input
+                        type="number"
+                        step="0.1"
+                        min="0"
+                        max="2"
+                        value={llmTemperature}
+                        onChange={(e) => setLlmTemperature(e.target.value)}
+                        placeholder={settings?.default_llm_temperature?.toString() || "0.7"}
+                        className="w-full bg-[#121212] border border-[#2a2a2a] rounded-xl px-4 py-3 text-sm text-white placeholder-gray-600 focus:border-[#404040] focus:outline-none transition-all"
+                      />
+                      <p className="mt-1 text-xs text-gray-600">
+                        Default: {settings?.default_llm_temperature}
+                      </p>
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray-400 mb-2">
+                        Max Tokens
+                      </label>
+                      <input
+                        type="number"
+                        step="100"
+                        min="1"
+                        value={llmMaxTokens}
+                        onChange={(e) => setLlmMaxTokens(e.target.value)}
+                        placeholder={settings?.default_llm_max_tokens?.toString() || "1000"}
+                        className="w-full bg-[#121212] border border-[#2a2a2a] rounded-xl px-4 py-3 text-sm text-white placeholder-gray-600 focus:border-[#404040] focus:outline-none transition-all"
+                      />
+                      <p className="mt-1 text-xs text-gray-600">
+                        Default: {settings?.default_llm_max_tokens}
+                      </p>
+                    </div>
                   </div>
                   
                   {/* Embedding Model */}
@@ -382,7 +477,24 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
                     </datalist>
                     <p className="mt-1 text-xs text-gray-600">
                       Default: {settings?.default_embedding_model}
-                      {availableModels?.embedding_models.length ? " (suggestions available)" : ""}
+                    </p>
+                  </div>
+                  
+                  {/* Embedding Dimension */}
+                  <div>
+                    <label className="block text-xs text-gray-400 mb-2">
+                      Embedding Dimension
+                    </label>
+                    <input
+                      type="number"
+                      min="1"
+                      value={embeddingDim}
+                      onChange={(e) => setEmbeddingDim(e.target.value)}
+                      placeholder={settings?.default_embedding_dim?.toString() || "1536"}
+                      className="w-full bg-[#121212] border border-[#2a2a2a] rounded-xl px-4 py-3 text-sm text-white placeholder-gray-600 focus:border-[#404040] focus:outline-none transition-all"
+                    />
+                    <p className="mt-1 text-xs text-gray-600">
+                      Default: {settings?.default_embedding_dim}
                     </p>
                   </div>
                   
@@ -396,11 +508,11 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
                         <Loader2 size={14} className="animate-spin" />
                         Saving...
                       </span>
-                    ) : "Save Model Preferences"}
+                    ) : "Save Preferences"}
                   </button>
                   
                   <p className="text-xs text-gray-500">
-                    Leave empty to use the default models from server configuration.
+                    Leave empty to use the default settings from server configuration.
                   </p>
                 </div>
               </div>

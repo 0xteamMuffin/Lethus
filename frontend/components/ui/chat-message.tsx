@@ -1,5 +1,5 @@
-import React from "react";
-import { User } from "lucide-react";
+import React, { useState } from "react";
+import { User, ChevronDown, ChevronRight, Brain } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -8,14 +8,18 @@ interface ChatMessageProps {
   sender: "user" | "ai";
   timestamp?: string;
   isStreaming?: boolean;
+  thinking?: string;
 }
 
 const ChatMessage: React.FC<ChatMessageProps> = ({
   content,
   sender,
   timestamp,
+  isStreaming,
+  thinking,
 }) => {
   const isUser = sender === "user";
+  const [isThinkingExpanded, setIsThinkingExpanded] = useState(false);
 
   return (
     <div
@@ -43,6 +47,50 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
             <span className="text-sm font-semibold text-white mb-2 ml-1">
               Lethus AI
             </span>
+          )}
+
+          {/* Thinking/Reasoning section */}
+          {!isUser && thinking && (
+            <div className="w-full mb-3">
+              <button
+                onClick={() => setIsThinkingExpanded(!isThinkingExpanded)}
+                className="flex items-center gap-2 px-3 py-2 text-xs font-medium text-gray-400 hover:text-gray-300 bg-[#151515] border border-[#2a2a2a] rounded-lg transition-colors"
+              >
+                <Brain size={14} className="text-purple-400" />
+                <span>Thinking{isStreaming && thinking ? "..." : ""}</span>
+                {isThinkingExpanded ? (
+                  <ChevronDown size={14} />
+                ) : (
+                  <ChevronRight size={14} />
+                )}
+              </button>
+              {isThinkingExpanded && (
+                <div className="mt-2 px-4 py-3 bg-[#0d0d0d] border border-[#252525] rounded-lg text-[13px] text-gray-400 leading-relaxed max-h-[300px] overflow-y-auto">
+                  <ReactMarkdown
+                    remarkPlugins={[remarkGfm]}
+                    components={{
+                      p: ({ children }) => (
+                        <p className="mb-2 last:mb-0">{children}</p>
+                      ),
+                      code: ({ className, children }) => {
+                        const isBlock = className?.includes("language-");
+                        return isBlock ? (
+                          <pre className="bg-[#111] border border-[#222] rounded-lg p-3 overflow-x-auto my-2 text-xs">
+                            <code className={className}>{children}</code>
+                          </pre>
+                        ) : (
+                          <code className="bg-[#222] px-1 py-0.5 rounded text-xs">
+                            {children}
+                          </code>
+                        );
+                      },
+                    }}
+                  >
+                    {thinking}
+                  </ReactMarkdown>
+                </div>
+              )}
+            </div>
           )}
 
           <div

@@ -80,7 +80,7 @@ export async function sendChatCompletion(params: SendMessageParams): Promise<{
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      model: params.model || "gpt-4o-mini",
+      model: params.model,
       messages: params.messages,
       user_id: params.userId,
       stream: false,
@@ -109,11 +109,13 @@ export async function sendChatCompletion(params: SendMessageParams): Promise<{
 /**
  * Stream chat completion via proxy.
  * Uses user's stored API key from database.
+ * Supports thinking/reasoning content from models like DeepSeek-R1.
  */
 export async function streamChatCompletion(
   params: SendMessageParams,
   onChunk: (content: string) => void,
-  onComplete?: (dycpStats: DYCPStats) => void
+  onComplete?: (dycpStats: DYCPStats) => void,
+  onThinking?: (thinking: string) => void
 ): Promise<void> {
   const res = await fetch(`${API_BASE}/v1/chat/completions`, {
     method: "POST",
@@ -121,7 +123,7 @@ export async function streamChatCompletion(
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      model: params.model || "gpt-4o-mini",
+      model: params.model,
       messages: params.messages,
       user_id: params.userId,
       stream: true,
@@ -183,6 +185,15 @@ export async function streamChatCompletion(
             const content = data.choices?.[0]?.delta?.content;
             if (content) {
               onChunk(content);
+            }
+            
+            // Handle thinking/reasoning content (DeepSeek, Ollama, etc.)
+            // Different providers use different field names
+            const reasoningContent = 
+              data.choices?.[0]?.delta?.reasoning_content ||  // DeepSeek
+              data.choices?.[0]?.delta?.reasoning;            // Ollama (qwen3, etc.)
+            if (reasoningContent && onThinking) {
+              onThinking(reasoningContent);
             }
           } catch (e) {
             // Skip invalid JSON chunks

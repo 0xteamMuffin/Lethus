@@ -39,6 +39,7 @@ interface Message {
   content: string;
   sender: "user" | "ai";
   timestamp: string;
+  thinking?: string;
 }
 
 const LibreChatInterface: React.FC<LibreChatInterfaceProps> = ({
@@ -56,6 +57,7 @@ const LibreChatInterface: React.FC<LibreChatInterfaceProps> = ({
   );
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [hasApiKey, setHasApiKey] = useState<boolean>(false);
+  const [userModel, setUserModel] = useState<string | null>(null);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const [lastDycpStats, setLastDycpStats] = useState<DYCPStats | null>(null);
   const [streamingMessageId, setStreamingMessageId] = useState<string | null>(
@@ -64,6 +66,7 @@ const LibreChatInterface: React.FC<LibreChatInterfaceProps> = ({
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const streamingMessageRef = useRef<string>("");
+  const streamingThinkingRef = useRef<string>("");
 
   // Check if user has API key in backend on mount
   useEffect(() => {
@@ -76,6 +79,7 @@ const LibreChatInterface: React.FC<LibreChatInterfaceProps> = ({
 
         const settings = await getUserSettings(userId);
         setHasApiKey(settings.has_api_key);
+        setUserModel(settings.llm_model || settings.default_llm_model);
       } catch (error) {
         console.error("Failed to check API key:", error);
       }
@@ -204,6 +208,7 @@ const LibreChatInterface: React.FC<LibreChatInterfaceProps> = ({
 
     setIsSending(true);
     streamingMessageRef.current = "";
+    streamingThinkingRef.current = "";
 
     const userMessage: Message = {
       id: Date.now().toString(),
@@ -256,7 +261,7 @@ const LibreChatInterface: React.FC<LibreChatInterfaceProps> = ({
         {
           messages: updatedHistory,
           userId: getUserId(),
-          model: "gpt-4o-mini",
+          model: userModel || undefined,
           stream: true,
         },
         (chunk) => {
@@ -264,7 +269,7 @@ const LibreChatInterface: React.FC<LibreChatInterfaceProps> = ({
           setMessages((prev) =>
             prev.map((msg) =>
               msg.id === aiMessageId
-                ? { ...msg, content: streamingMessageRef.current }
+                ? { ...msg, content: streamingMessageRef.current, thinking: streamingThinkingRef.current || undefined }
                 : msg,
             ),
           );
@@ -277,6 +282,16 @@ const LibreChatInterface: React.FC<LibreChatInterfaceProps> = ({
               `DYCP saved ~${stats.tokensSaved.toLocaleString()} tokens`,
             );
           }
+        },
+        (thinking) => {
+          streamingThinkingRef.current += thinking;
+          setMessages((prev) =>
+            prev.map((msg) =>
+              msg.id === aiMessageId
+                ? { ...msg, thinking: streamingThinkingRef.current }
+                : msg,
+            ),
+          );
         },
       );
 
@@ -419,6 +434,7 @@ const LibreChatInterface: React.FC<LibreChatInterfaceProps> = ({
                 sender={msg.sender}
                 timestamp={msg.timestamp}
                 isStreaming={msg.id === streamingMessageId}
+                thinking={msg.thinking}
               />
             ))}
             <div ref={messagesEndRef} />

@@ -20,9 +20,13 @@ class User(Base):
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(String(255), unique=True, index=True)  # Client-generated user ID
     openai_api_key = Column(String(500), nullable=True)  # Encrypted in production
+    openai_base_url = Column(String(500), nullable=True)  # Custom base URL (None = use env default)
     # Model selections (None = use env defaults)
     llm_model = Column(String(255), nullable=True)  # e.g., "gpt-4o", "gpt-4o-mini"
+    llm_temperature = Column(Float, nullable=True)  # e.g., 0.7
+    llm_max_tokens = Column(Integer, nullable=True)  # e.g., 1000
     embedding_model = Column(String(255), nullable=True)  # e.g., "text-embedding-3-small"
+    embedding_dim = Column(Integer, nullable=True)  # e.g., 1536
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

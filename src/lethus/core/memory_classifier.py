@@ -165,7 +165,7 @@ class MemoryClassifier:
             client = OpenAI(api_key=api_key, base_url=settings.openai_base_url)
             
             response = client.chat.completions.create(
-                model="gpt-4o-mini",
+                model=settings.llm_model,
                 messages=[
                     {"role": "system", "content": """Extract structured memories from the user message.
 Return JSON array with objects containing:
