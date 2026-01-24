@@ -20,6 +20,9 @@ class User(Base):
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(String(255), unique=True, index=True)  # Client-generated user ID
     openai_api_key = Column(String(500), nullable=True)  # Encrypted in production
+    # Model selections (None = use env defaults)
+    llm_model = Column(String(255), nullable=True)  # e.g., "gpt-4o", "gpt-4o-mini"
+    embedding_model = Column(String(255), nullable=True)  # e.g., "text-embedding-3-small"
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

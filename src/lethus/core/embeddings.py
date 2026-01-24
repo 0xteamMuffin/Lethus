@@ -91,7 +91,8 @@ class OpenAIEmbeddingProvider(EmbeddingProvider):
 
 def get_embedding_provider(
     provider: str = None,
-    api_key: Optional[str] = None
+    api_key: Optional[str] = None,
+    model: Optional[str] = None
 ) -> EmbeddingProvider:
     """
     Factory function to get the configured embedding provider.
@@ -99,10 +100,11 @@ def get_embedding_provider(
     Args:
         provider: "local" or "openai" (defaults to config setting)
         api_key: OpenAI API key (only needed for openai provider)
+        model: Embedding model name (only for openai provider)
     """
     provider = provider or settings.embedding_provider
     
     if provider == "openai":
-        return OpenAIEmbeddingProvider(api_key=api_key)
+        return OpenAIEmbeddingProvider(api_key=api_key, model=model)
     else:
         return LocalEmbeddingProvider()
