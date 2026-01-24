@@ -2,11 +2,9 @@
 import { useState, useEffect } from "react";
 import LibreChatInterface from "@/components/mainpage";
 import SideNavbar from "@/components/sidenavbar";
-import MemorySidebar from "@/components/ui/memory-sidebar";
 
 export default function Home() {
   const [isLeftSidebarOpen, setIsLeftSidebarOpen] = useState(false);
-  const [isRightSidebarOpen, setIsRightSidebarOpen] = useState(false);
   const [currentConversationId, setCurrentConversationId] = useState<number | undefined>(undefined);
   const [userId, setUserId] = useState<string>("");
 
@@ -46,14 +44,8 @@ export default function Home() {
       />
       <LibreChatInterface 
         onToggleSidebar={() => setIsLeftSidebarOpen(true)}
-        onToggleMemory={() => setIsRightSidebarOpen(true)}
         conversationId={currentConversationId}
         onConversationCreated={handleConversationCreated}
-      />
-
-      <MemorySidebar 
-        isOpen={isRightSidebarOpen} 
-        onClose={() => setIsRightSidebarOpen(false)} 
       />
       
     </div>

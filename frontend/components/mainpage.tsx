@@ -2,21 +2,19 @@
 import React, { useState, useRef, useEffect } from "react";
 import {
   ChevronDown,
-  Paperclip,
-  Code,
-  Server,
-  Mic,
   ArrowUp,
-  LayoutGrid,
   Menu,
-  Radar,
   Settings,
+  Zap,
+  ZapOff,
 } from "lucide-react";
 import { toast, Toaster } from "sonner";
 import {
   streamChatCompletion,
   getConversationTurns,
+  getConversation,
   createConversation,
+  updateConversation,
   type Turn,
   type ChatMessage as APIChatMessage,
   type DYCPStats,
@@ -29,7 +27,6 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 interface LibreChatInterfaceProps {
   onToggleSidebar?: () => void;
-  onToggleMemory?: () => void;
   conversationId?: number;
   onConversationCreated?: (id: number) => void;
 }
@@ -39,11 +36,12 @@ interface Message {
   content: string;
   sender: "user" | "ai";
   timestamp: string;
+  thinking?: string;
+  dycpStats?: DYCPStats;  // Stats for AI messages
 }
 
 const LibreChatInterface: React.FC<LibreChatInterfaceProps> = ({
   onToggleSidebar,
-  onToggleMemory,
   conversationId: propConversationId,
   onConversationCreated,
 }) => {
@@ -56,14 +54,18 @@ const LibreChatInterface: React.FC<LibreChatInterfaceProps> = ({
   );
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [hasApiKey, setHasApiKey] = useState<boolean>(false);
+  const [userModel, setUserModel] = useState<string | null>(null);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const [lastDycpStats, setLastDycpStats] = useState<DYCPStats | null>(null);
   const [streamingMessageId, setStreamingMessageId] = useState<string | null>(
     null,
   );
+  const [enhancedMode, setEnhancedMode] = useState<boolean>(true);  // Default to enhanced
+  const [enhancedModeLocked, setEnhancedModeLocked] = useState<boolean>(false);  // Lock after first enhanced message
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const streamingMessageRef = useRef<string>("");
+  const streamingThinkingRef = useRef<string>("");
 
   // Check if user has API key in backend on mount
   useEffect(() => {
@@ -76,6 +78,7 @@ const LibreChatInterface: React.FC<LibreChatInterfaceProps> = ({
 
         const settings = await getUserSettings(userId);
         setHasApiKey(settings.has_api_key);
+        setUserModel(settings.llm_model || settings.default_llm_model);
       } catch (error) {
         console.error("Failed to check API key:", error);
       }
@@ -90,12 +93,29 @@ const LibreChatInterface: React.FC<LibreChatInterfaceProps> = ({
       setConversationId(propConversationId);
       if (propConversationId) {
         loadConversationHistory(propConversationId);
+        // Load conversation metadata including enhanced_mode
+        loadConversationMetadata(propConversationId);
       } else {
+        // New conversation - reset state
         setMessages([]);
         setChatHistory([]);
+        setEnhancedMode(true);
+        setEnhancedModeLocked(false);
       }
     }
   }, [propConversationId]);
+
+  // Load conversation metadata (enhanced_mode)
+  const loadConversationMetadata = async (convId: number) => {
+    try {
+      const conv = await getConversation(convId);
+      setEnhancedMode(conv.enhanced_mode);
+      // Lock toggle if enhanced mode is already on (can't turn off)
+      setEnhancedModeLocked(conv.enhanced_mode);
+    } catch (error) {
+      console.error("Failed to load conversation metadata:", error);
+    }
+  };
 
   // Load conversation history
   const loadConversationHistory = async (convId: number) => {
@@ -204,6 +224,7 @@ const LibreChatInterface: React.FC<LibreChatInterfaceProps> = ({
 
     setIsSending(true);
     streamingMessageRef.current = "";
+    streamingThinkingRef.current = "";
 
     const userMessage: Message = {
       id: Date.now().toString(),
@@ -246,25 +267,36 @@ const LibreChatInterface: React.FC<LibreChatInterfaceProps> = ({
         const conv = await createConversation(
           getUserId(),
           messageToSend.slice(0, 50),
+          enhancedMode,  // Pass enhanced_mode when creating
         );
         currentConvId = conv.id;
         setConversationId(currentConvId);
         onConversationCreated?.(currentConvId);
+        // Lock toggle if enhanced mode is on
+        if (enhancedMode) {
+          setEnhancedModeLocked(true);
+        }
       }
+
+      // Track stats for this message
+      let responseStats: DYCPStats | null = null;
 
       await streamChatCompletion(
         {
           messages: updatedHistory,
           userId: getUserId(),
-          model: "gpt-4o-mini",
+          model: userModel || undefined,
           stream: true,
+          conversationId: currentConvId,
+          enhancedMode: enhancedMode,
         },
-        (chunk) => {
-          streamingMessageRef.current += chunk;
+        (_chunk, fullContent) => {
+          // Use the full accumulated content directly for smoother updates
+          streamingMessageRef.current = fullContent;
           setMessages((prev) =>
             prev.map((msg) =>
               msg.id === aiMessageId
-                ? { ...msg, content: streamingMessageRef.current }
+                ? { ...msg, content: fullContent, thinking: streamingThinkingRef.current || undefined }
                 : msg,
             ),
           );
@@ -272,11 +304,38 @@ const LibreChatInterface: React.FC<LibreChatInterfaceProps> = ({
         (stats) => {
           setStreamingMessageId(null);
           setLastDycpStats(stats);
+          responseStats = stats;
+          
+          // Update message with final stats
+          setMessages((prev) =>
+            prev.map((msg) =>
+              msg.id === aiMessageId
+                ? { ...msg, dycpStats: stats }
+                : msg,
+            ),
+          );
+          
+          // Lock toggle after first enhanced response
+          if (stats.enhancedMode) {
+            setEnhancedModeLocked(true);
+          }
+          
           if (stats.tokensSaved > 0) {
             toast.success(
               `DYCP saved ~${stats.tokensSaved.toLocaleString()} tokens`,
             );
           }
+        },
+        (_chunk, fullThinking) => {
+          // Use the full accumulated thinking directly for smoother updates
+          streamingThinkingRef.current = fullThinking;
+          setMessages((prev) =>
+            prev.map((msg) =>
+              msg.id === aiMessageId
+                ? { ...msg, thinking: fullThinking }
+                : msg,
+            ),
+          );
         },
       );
 
@@ -342,22 +401,42 @@ const LibreChatInterface: React.FC<LibreChatInterfaceProps> = ({
         </div>
 
         <div className="flex items-center gap-2">
+          {/* Enhanced Mode Toggle */}
+          <button
+            onClick={() => {
+              if (!enhancedModeLocked) {
+                const newMode = !enhancedMode;
+                setEnhancedMode(newMode);
+                // Update conversation in DB if it exists
+                if (conversationId && newMode) {
+                  updateConversation(conversationId, { enhanced_mode: newMode });
+                  setEnhancedModeLocked(true);  // Lock after enabling
+                }
+              }
+            }}
+            disabled={enhancedModeLocked}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all duration-200 ${
+              enhancedMode
+                ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"
+                : "bg-[#1a1a1a] text-gray-400 border border-[#2a2a2a] hover:text-white"
+            } ${enhancedModeLocked ? "opacity-60 cursor-not-allowed" : "cursor-pointer hover:opacity-80"}`}
+            title={enhancedModeLocked 
+              ? "Enhanced mode is locked for this conversation" 
+              : enhancedMode 
+                ? "Enhanced mode: DYCP + Ghost Graph active" 
+                : "Normal mode: Direct passthrough"
+            }
+          >
+            {enhancedMode ? <Zap size={14} /> : <ZapOff size={14} />}
+            <span className="hidden sm:inline">{enhancedMode ? "Enhanced" : "Normal"}</span>
+          </button>
+          
           <button
             onClick={() => setIsSettingsOpen(true)}
             className="p-2 rounded-lg hover:bg-[#1a1a1a] hover:text-white transition-all duration-200"
             title="Settings"
           >
             <Settings size={18} />
-          </button>
-          <button className="p-2 rounded-lg hover:bg-[#1a1a1a] hover:text-white transition-all duration-200">
-            <LayoutGrid size={18} />
-          </button>
-
-          <button
-            onClick={onToggleMemory}
-            className="p-2 text-gray-400 hover:text-white lg:hidden"
-          >
-            <Radar size={18} />
           </button>
         </div>
       </header>
@@ -419,6 +498,8 @@ const LibreChatInterface: React.FC<LibreChatInterfaceProps> = ({
                 sender={msg.sender}
                 timestamp={msg.timestamp}
                 isStreaming={msg.id === streamingMessageId}
+                thinking={msg.thinking}
+                dycpStats={msg.dycpStats}
               />
             ))}
             <div ref={messagesEndRef} />
@@ -447,29 +528,7 @@ const LibreChatInterface: React.FC<LibreChatInterfaceProps> = ({
               />
             </div>
 
-            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-0 mt-2 md:mt-3">
-              <div className="flex items-center gap-2 overflow-x-auto w-full sm:w-auto pb-1 sm:pb-0 scrollbar-none">
-                <button className="p-2 text-gray-400 hover:text-white hover:bg-[#1a1a1a] rounded-lg transition-all duration-200 shrink-0">
-                  <Paperclip size={18} />
-                </button>
-
-                <button className="flex items-center gap-2 bg-[#1a1a1a] px-3 py-2 rounded-lg border border-[#2a2a2a] hover:bg-[#212121] hover:border-[#333333] transition-all duration-200 text-xs font-medium text-gray-300 shrink-0">
-                  <Code size={14} />
-                  <span>Code</span>
-                </button>
-
-                <button className="flex items-center gap-2 bg-[#1a1a1a] px-3 py-2 rounded-lg border border-[#2a2a2a] hover:bg-[#212121] hover:border-[#333333] transition-all duration-200 text-xs font-medium text-gray-300 shrink-0">
-                  <Server size={14} />
-                  <span>MCP</span>
-                  <ChevronDown size={12} className="opacity-70" />
-                </button>
-              </div>
-
-              <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
-                <button className="p-2 text-gray-400 hover:text-white hover:bg-[#1a1a1a] rounded-lg transition-all duration-200">
-                  <Mic size={20} />
-                </button>
-
+            <div className="flex items-center justify-end mt-2 md:mt-3">
                 <button
                   onClick={handleSendMessage}
                   disabled={!message.trim() || isSending}
@@ -481,7 +540,6 @@ const LibreChatInterface: React.FC<LibreChatInterfaceProps> = ({
                 >
                   <ArrowUp size={18} strokeWidth={2.5} />
                 </button>
-              </div>
             </div>
           </div>
         </div>

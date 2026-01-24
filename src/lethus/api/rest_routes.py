@@ -20,17 +20,30 @@ router = APIRouter()
 class UserSettingsRequest(BaseModel):
     user_id: str
     openai_api_key: Optional[str] = None
+    openai_base_url: Optional[str] = None  # Custom base URL (None = use env default)
     llm_model: Optional[str] = None  # Selected LLM model (None = use env default)
+    llm_temperature: Optional[float] = None  # Temperature (None = use env default)
+    llm_max_tokens: Optional[int] = None  # Max tokens (None = use env default)
     embedding_model: Optional[str] = None  # Selected embedding model (None = use env default)
+    embedding_dim: Optional[int] = None  # Embedding dimension (None = use env default)
 
 
 class UserSettingsResponse(BaseModel):
     user_id: str
     has_api_key: bool
+    openai_base_url: Optional[str] = None  # User's custom base URL
     llm_model: Optional[str] = None  # User's selected LLM model
+    llm_temperature: Optional[float] = None  # User's temperature setting
+    llm_max_tokens: Optional[int] = None  # User's max tokens setting
     embedding_model: Optional[str] = None  # User's selected embedding model
-    default_llm_model: str  # Env default LLM model
-    default_embedding_model: str  # Env default embedding model
+    embedding_dim: Optional[int] = None  # User's embedding dimension
+    # Environment defaults shown to frontend
+    default_openai_base_url: str
+    default_llm_model: str
+    default_llm_temperature: float
+    default_llm_max_tokens: int
+    default_embedding_model: str
+    default_embedding_dim: int
     created_at: datetime
     updated_at: datetime
 
@@ -49,6 +62,8 @@ class AvailableModelsResponse(BaseModel):
 
 class ValidateApiKeyRequest(BaseModel):
     api_key: str
+    base_url: Optional[str] = None  # Custom base URL (None = use env default)
+    model: Optional[str] = None  # Model to test with (None = use env default)
 
 
 class ValidateApiKeyResponse(BaseModel):
@@ -59,14 +74,21 @@ class ValidateApiKeyResponse(BaseModel):
 class ConversationRequest(BaseModel):
     user_id: str
     title: Optional[str] = "New Conversation"
+    enhanced_mode: Optional[bool] = True  # True = use DYCP/Ghost Graph
 
 
 class ConversationResponse(BaseModel):
     id: int
     user_id: str
     title: str
+    enhanced_mode: bool
     created_at: datetime
     updated_at: datetime
+
+
+class ConversationUpdateRequest(BaseModel):
+    title: Optional[str] = None
+    enhanced_mode: Optional[bool] = None
 
 
 class TurnResponse(BaseModel):
@@ -103,14 +125,34 @@ async def save_user_settings(request: UserSettingsRequest, db: Session = Depends
         user.openai_api_key = request.openai_api_key
         user.updated_at = datetime.utcnow()
     
+    # Update base URL if provided (empty string clears it to use default)
+    if request.openai_base_url is not None:
+        user.openai_base_url = request.openai_base_url if request.openai_base_url else None
+        user.updated_at = datetime.utcnow()
+    
     # Update LLM model if provided (empty string clears it to use default)
     if request.llm_model is not None:
         user.llm_model = request.llm_model if request.llm_model else None
         user.updated_at = datetime.utcnow()
     
+    # Update temperature if provided (None clears it to use default)
+    if request.llm_temperature is not None:
+        user.llm_temperature = request.llm_temperature if request.llm_temperature >= 0 else None
+        user.updated_at = datetime.utcnow()
+    
+    # Update max tokens if provided (None clears it to use default)
+    if request.llm_max_tokens is not None:
+        user.llm_max_tokens = request.llm_max_tokens if request.llm_max_tokens > 0 else None
+        user.updated_at = datetime.utcnow()
+    
     # Update embedding model if provided (empty string clears it to use default)
     if request.embedding_model is not None:
         user.embedding_model = request.embedding_model if request.embedding_model else None
+        user.updated_at = datetime.utcnow()
+    
+    # Update embedding dimension if provided (None clears it to use default)
+    if request.embedding_dim is not None:
+        user.embedding_dim = request.embedding_dim if request.embedding_dim > 0 else None
         user.updated_at = datetime.utcnow()
     
     db.commit()
@@ -119,10 +161,18 @@ async def save_user_settings(request: UserSettingsRequest, db: Session = Depends
     return UserSettingsResponse(
         user_id=user.user_id,
         has_api_key=bool(user.openai_api_key),
+        openai_base_url=user.openai_base_url,
         llm_model=user.llm_model,
+        llm_temperature=user.llm_temperature,
+        llm_max_tokens=user.llm_max_tokens,
         embedding_model=user.embedding_model,
+        embedding_dim=user.embedding_dim,
+        default_openai_base_url=settings.openai_base_url,
         default_llm_model=settings.llm_model,
+        default_llm_temperature=settings.llm_temperature,
+        default_llm_max_tokens=settings.llm_max_tokens,
         default_embedding_model=settings.openai_embedding_model,
+        default_embedding_dim=settings.openai_embedding_dim,
         created_at=user.created_at,
         updated_at=user.updated_at
     )
@@ -138,10 +188,18 @@ async def get_user_settings(user_id: str, db: Session = Depends(get_db)):
         return UserSettingsResponse(
             user_id=user_id,
             has_api_key=False,
+            openai_base_url=None,
             llm_model=None,
+            llm_temperature=None,
+            llm_max_tokens=None,
             embedding_model=None,
+            embedding_dim=None,
+            default_openai_base_url=settings.openai_base_url,
             default_llm_model=settings.llm_model,
+            default_llm_temperature=settings.llm_temperature,
+            default_llm_max_tokens=settings.llm_max_tokens,
             default_embedding_model=settings.openai_embedding_model,
+            default_embedding_dim=settings.openai_embedding_dim,
             created_at=datetime.utcnow(),
             updated_at=datetime.utcnow()
         )
@@ -149,10 +207,18 @@ async def get_user_settings(user_id: str, db: Session = Depends(get_db)):
     return UserSettingsResponse(
         user_id=user.user_id,
         has_api_key=bool(user.openai_api_key),
+        openai_base_url=user.openai_base_url,
         llm_model=user.llm_model,
+        llm_temperature=user.llm_temperature,
+        llm_max_tokens=user.llm_max_tokens,
         embedding_model=user.embedding_model,
+        embedding_dim=user.embedding_dim,
+        default_openai_base_url=settings.openai_base_url,
         default_llm_model=settings.llm_model,
+        default_llm_temperature=settings.llm_temperature,
+        default_llm_max_tokens=settings.llm_max_tokens,
         default_embedding_model=settings.openai_embedding_model,
+        default_embedding_dim=settings.openai_embedding_dim,
         created_at=user.created_at,
         updated_at=user.updated_at
     )
@@ -161,16 +227,21 @@ async def get_user_settings(user_id: str, db: Session = Depends(get_db)):
 @router.post("/settings/validate-api-key", response_model=ValidateApiKeyResponse)
 async def validate_api_key(request: ValidateApiKeyRequest):
     """Validate an API key by making a minimal chat completion request"""
+    # Use provided values if set, otherwise use env defaults
+    effective_base_url = request.base_url or settings.openai_base_url
+    effective_base_url = effective_base_url.rstrip("/")
+    effective_model = request.model or settings.llm_model
+    
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.post(
-                f"{settings.openai_base_url}/chat/completions",
+                f"{effective_base_url}/chat/completions",
                 headers={
                     "Authorization": f"Bearer {request.api_key}",
                     "Content-Type": "application/json"
                 },
                 json={
-                    "model": settings.llm_model,
+                    "model": effective_model,
                     "messages": [{"role": "user", "content": "Hi"}],
                     "max_tokens": 1
                 }
@@ -202,7 +273,9 @@ async def get_available_models(user_id: str, db: Session = Depends(get_db)):
     if not user or not user.openai_api_key:
         return AvailableModelsResponse(llm_models=[], embedding_models=[])
     
-    base_url = settings.openai_base_url.rstrip("/")
+    # Use user's custom base_url if set, otherwise use env default
+    effective_base_url = user.openai_base_url or settings.openai_base_url
+    base_url = effective_base_url.rstrip("/")
     
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
@@ -264,7 +337,8 @@ async def create_conversation(request: ConversationRequest, db: Session = Depend
     """Create a new conversation"""
     conversation = Conversation(
         user_id=request.user_id,
-        title=request.title
+        title=request.title,
+        enhanced_mode=request.enhanced_mode if request.enhanced_mode is not None else True
     )
     db.add(conversation)
     db.commit()
@@ -274,6 +348,7 @@ async def create_conversation(request: ConversationRequest, db: Session = Depend
         id=conversation.id,
         user_id=conversation.user_id,
         title=conversation.title,
+        enhanced_mode=conversation.enhanced_mode,
         created_at=conversation.created_at,
         updated_at=conversation.updated_at
     )
@@ -291,6 +366,7 @@ async def get_user_conversations(user_id: str, db: Session = Depends(get_db)):
             id=conv.id,
             user_id=conv.user_id,
             title=conv.title,
+            enhanced_mode=conv.enhanced_mode if conv.enhanced_mode is not None else True,
             created_at=conv.created_at,
             updated_at=conv.updated_at
         )
@@ -312,6 +388,38 @@ async def get_conversation(conversation_id: int, db: Session = Depends(get_db)):
         id=conversation.id,
         user_id=conversation.user_id,
         title=conversation.title,
+        enhanced_mode=conversation.enhanced_mode if conversation.enhanced_mode is not None else True,
+        created_at=conversation.created_at,
+        updated_at=conversation.updated_at
+    )
+
+
+@router.patch("/conversations/{conversation_id}", response_model=ConversationResponse)
+async def update_conversation(conversation_id: int, request: ConversationUpdateRequest, db: Session = Depends(get_db)):
+    """Update a conversation (title or enhanced_mode). Note: enhanced_mode can only be turned ON, not OFF."""
+    conversation = db.query(Conversation).filter(
+        Conversation.id == conversation_id
+    ).first()
+    
+    if not conversation:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    
+    if request.title is not None:
+        conversation.title = request.title
+    
+    # enhanced_mode can only be turned ON (True), once on it stays on
+    if request.enhanced_mode is True and not conversation.enhanced_mode:
+        conversation.enhanced_mode = True
+    
+    conversation.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(conversation)
+    
+    return ConversationResponse(
+        id=conversation.id,
+        user_id=conversation.user_id,
+        title=conversation.title,
+        enhanced_mode=conversation.enhanced_mode if conversation.enhanced_mode is not None else True,
         created_at=conversation.created_at,
         updated_at=conversation.updated_at
     )

@@ -12,6 +12,8 @@ export interface SendMessageParams {
   userId: string;
   model?: string;
   stream?: boolean;
+  conversationId?: number;  // For fetching enhanced_mode from DB
+  enhancedMode?: boolean;   // Override: true = DYCP, false = passthrough
 }
 
 export interface ChatCompletionResponse {
@@ -35,18 +37,31 @@ export interface ChatCompletionResponse {
 }
 
 export interface DYCPStats {
+  enhancedMode: boolean;
   originalMessages: number;
   reducedMessages: number;
   originalTokens: number;
   reducedTokens: number;
   tokensSaved: number;
   reductionPercent: number;
+  spansFound: number;
+  processingMs: number;
+  // Extended stats (only in enhanced mode)
+  ghostEntities?: number;
+  ghostBoosts?: number;
+  decayLambda?: number;
+  tau?: number;
+  theta?: number;
+  entityNames?: string[];
+  spanDetails?: [number, number][];
+  boostCount?: number;
 }
 
 export interface Conversation {
   id: number;
   user_id: string;
   title: string;
+  enhanced_mode: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -67,6 +82,48 @@ export interface ConversationWithTurns extends Conversation {
 }
 
 /**
+ * Parse DYCP stats from response headers
+ */
+function parseDycpStats(headers: Headers): DYCPStats {
+  const enhancedMode = headers.get("X-Lethus-Enhanced-Mode") === "true";
+  
+  const stats: DYCPStats = {
+    enhancedMode,
+    originalMessages: parseInt(headers.get("X-Lethus-Original-Messages") || "0"),
+    reducedMessages: parseInt(headers.get("X-Lethus-Reduced-Messages") || "0"),
+    originalTokens: parseInt(headers.get("X-Lethus-Original-Tokens") || "0"),
+    reducedTokens: parseInt(headers.get("X-Lethus-Reduced-Tokens") || "0"),
+    tokensSaved: parseInt(headers.get("X-Lethus-Tokens-Saved") || "0"),
+    reductionPercent: parseFloat(headers.get("X-Lethus-Reduction-Percent") || "0"),
+    spansFound: parseInt(headers.get("X-Lethus-Spans-Found") || "0"),
+    processingMs: parseFloat(headers.get("X-Lethus-Processing-Ms") || "0"),
+  };
+  
+  // Parse extended stats (only present in enhanced mode)
+  if (enhancedMode) {
+    stats.ghostEntities = parseInt(headers.get("X-Lethus-Ghost-Entities") || "0");
+    stats.ghostBoosts = parseInt(headers.get("X-Lethus-Ghost-Boosts") || "0");
+    stats.decayLambda = parseFloat(headers.get("X-Lethus-Decay-Lambda") || "0");
+    stats.tau = parseFloat(headers.get("X-Lethus-Tau") || "0");
+    stats.theta = parseFloat(headers.get("X-Lethus-Theta") || "0");
+    stats.boostCount = parseInt(headers.get("X-Lethus-Boost-Count") || "0");
+    
+    // Parse JSON-encoded arrays
+    try {
+      const entityNames = headers.get("X-Lethus-Entity-Names");
+      if (entityNames) stats.entityNames = JSON.parse(entityNames);
+    } catch { /* ignore */ }
+    
+    try {
+      const spanDetails = headers.get("X-Lethus-Span-Details");
+      if (spanDetails) stats.spanDetails = JSON.parse(spanDetails);
+    } catch { /* ignore */ }
+  }
+  
+  return stats;
+}
+
+/**
  * Send chat completion request via proxy.
  * Uses user's stored API key from database.
  */
@@ -80,9 +137,11 @@ export async function sendChatCompletion(params: SendMessageParams): Promise<{
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      model: params.model || "gpt-4o-mini",
+      model: params.model,
       messages: params.messages,
       user_id: params.userId,
+      conversation_id: params.conversationId,
+      enhanced_mode: params.enhancedMode,
       stream: false,
     }),
   });
@@ -92,16 +151,7 @@ export async function sendChatCompletion(params: SendMessageParams): Promise<{
     throw new Error(error || "Chat request failed");
   }
 
-  // Extract DYCP stats from headers
-  const dycpStats: DYCPStats = {
-    originalMessages: parseInt(res.headers.get("X-Lethus-Original-Messages") || "0"),
-    reducedMessages: parseInt(res.headers.get("X-Lethus-Reduced-Messages") || "0"),
-    originalTokens: parseInt(res.headers.get("X-Lethus-Original-Tokens") || "0"),
-    reducedTokens: parseInt(res.headers.get("X-Lethus-Reduced-Tokens") || "0"),
-    tokensSaved: parseInt(res.headers.get("X-Lethus-Tokens-Saved") || "0"),
-    reductionPercent: parseFloat(res.headers.get("X-Lethus-Reduction-Percent") || "0"),
-  };
-
+  const dycpStats = parseDycpStats(res.headers);
   const response = await res.json();
   return { response, dycpStats };
 }
@@ -109,11 +159,14 @@ export async function sendChatCompletion(params: SendMessageParams): Promise<{
 /**
  * Stream chat completion via proxy.
  * Uses user's stored API key from database.
+ * Supports thinking/reasoning content from models like DeepSeek-R1.
+ * Uses batched updates for smooth streaming display.
  */
 export async function streamChatCompletion(
   params: SendMessageParams,
-  onChunk: (content: string) => void,
-  onComplete?: (dycpStats: DYCPStats) => void
+  onChunk: (content: string, fullContent: string) => void,
+  onComplete?: (dycpStats: DYCPStats) => void,
+  onThinking?: (thinking: string, fullThinking: string) => void
 ): Promise<void> {
   const res = await fetch(`${API_BASE}/v1/chat/completions`, {
     method: "POST",
@@ -121,9 +174,11 @@ export async function streamChatCompletion(
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      model: params.model || "gpt-4o-mini",
+      model: params.model,
       messages: params.messages,
       user_id: params.userId,
+      conversation_id: params.conversationId,
+      enhanced_mode: params.enhancedMode,
       stream: true,
     }),
   });
@@ -134,14 +189,7 @@ export async function streamChatCompletion(
   }
 
   // Extract DYCP stats from headers
-  const dycpStats: DYCPStats = {
-    originalMessages: parseInt(res.headers.get("X-Lethus-Original-Messages") || "0"),
-    reducedMessages: parseInt(res.headers.get("X-Lethus-Reduced-Messages") || "0"),
-    originalTokens: parseInt(res.headers.get("X-Lethus-Original-Tokens") || "0"),
-    reducedTokens: parseInt(res.headers.get("X-Lethus-Reduced-Tokens") || "0"),
-    tokensSaved: parseInt(res.headers.get("X-Lethus-Tokens-Saved") || "0"),
-    reductionPercent: parseFloat(res.headers.get("X-Lethus-Reduction-Percent") || "0"),
-  };
+  const dycpStats = parseDycpStats(res.headers);
 
   const reader = res.body?.getReader();
   const decoder = new TextDecoder();
@@ -151,6 +199,32 @@ export async function streamChatCompletion(
   }
 
   let buffer = "";
+  
+  // Accumulated content for batched updates
+  let accumulatedContent = "";
+  let accumulatedThinking = "";
+  let pendingContentUpdate = "";
+  let pendingThinkingUpdate = "";
+  let rafId: number | null = null;
+  
+  // Flush pending updates via requestAnimationFrame for smooth rendering
+  const flushUpdates = () => {
+    if (pendingContentUpdate) {
+      onChunk(pendingContentUpdate, accumulatedContent);
+      pendingContentUpdate = "";
+    }
+    if (pendingThinkingUpdate && onThinking) {
+      onThinking(pendingThinkingUpdate, accumulatedThinking);
+      pendingThinkingUpdate = "";
+    }
+    rafId = null;
+  };
+  
+  const scheduleUpdate = () => {
+    if (rafId === null) {
+      rafId = requestAnimationFrame(flushUpdates);
+    }
+  };
 
   try {
     while (true) {
@@ -182,7 +256,19 @@ export async function streamChatCompletion(
             
             const content = data.choices?.[0]?.delta?.content;
             if (content) {
-              onChunk(content);
+              accumulatedContent += content;
+              pendingContentUpdate += content;
+              scheduleUpdate();
+            }
+            
+            // Handle thinking/reasoning content (DeepSeek, Ollama, etc.)
+            const reasoningContent = 
+              data.choices?.[0]?.delta?.reasoning_content ||  // DeepSeek
+              data.choices?.[0]?.delta?.reasoning;            // Ollama (qwen3, etc.)
+            if (reasoningContent && onThinking) {
+              accumulatedThinking += reasoningContent;
+              pendingThinkingUpdate += reasoningContent;
+              scheduleUpdate();
             }
           } catch (e) {
             // Skip invalid JSON chunks
@@ -199,11 +285,23 @@ export async function streamChatCompletion(
         const data = JSON.parse(buffer.trim().slice(6));
         const content = data.choices?.[0]?.delta?.content;
         if (content) {
-          onChunk(content);
+          accumulatedContent += content;
+          pendingContentUpdate += content;
         }
       } catch {
         // Ignore final incomplete chunk
       }
+    }
+    
+    // Final flush - ensure all pending updates are sent
+    if (rafId !== null) {
+      cancelAnimationFrame(rafId);
+    }
+    if (pendingContentUpdate) {
+      onChunk(pendingContentUpdate, accumulatedContent);
+    }
+    if (pendingThinkingUpdate && onThinking) {
+      onThinking(pendingThinkingUpdate, accumulatedThinking);
     }
   } finally {
     reader.releaseLock();
@@ -212,13 +310,21 @@ export async function streamChatCompletion(
   onComplete?.(dycpStats);
 }
 
-export async function createConversation(userId: string, title?: string): Promise<Conversation> {
+export async function createConversation(userId: string, title?: string, enhancedMode?: boolean): Promise<Conversation> {
   return apiFetch("/api/conversations", {
     method: "POST",
     body: JSON.stringify({
       user_id: userId,
       title: title || "New Conversation",
+      enhanced_mode: enhancedMode ?? true,  // Default to enhanced mode
     }),
+  });
+}
+
+export async function updateConversation(conversationId: number, updates: { title?: string; enhanced_mode?: boolean }): Promise<Conversation> {
+  return apiFetch(`/api/conversations/${conversationId}`, {
+    method: "PATCH",
+    body: JSON.stringify(updates),
   });
 }
 

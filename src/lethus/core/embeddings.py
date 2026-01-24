@@ -1,6 +1,6 @@
 """
-Embedding providers: Local (sentence-transformers) or OpenAI.
-Abstracts embedding generation to support multiple backends.
+Embedding provider for OpenAI-compatible APIs.
+Supports OpenAI, GitHub Models, Azure OpenAI, and other compatible endpoints.
 """
 from abc import ABC, abstractmethod
 from typing import List, Optional
@@ -29,53 +29,32 @@ class EmbeddingProvider(ABC):
         pass
 
 
-class LocalEmbeddingProvider(EmbeddingProvider):
-    """Local embeddings using sentence-transformers."""
-    
-    def __init__(self, model_name: str = None):
-        self.model_name = model_name or settings.local_embedding_model
-        self._model = None
-    
-    def _get_model(self):
-        """Lazy load the model."""
-        if self._model is None:
-            from sentence_transformers import SentenceTransformer
-            # nomic models require trust_remote_code
-            trust_remote = "nomic" in self.model_name.lower()
-            self._model = SentenceTransformer(self.model_name, trust_remote_code=trust_remote)
-        return self._model
-    
-    @property
-    def dim(self) -> int:
-        return settings.local_embedding_dim
-    
-    def embed_text(self, text: str) -> np.ndarray:
-        model = self._get_model()
-        return model.encode(text, convert_to_numpy=True)
-    
-    def embed_batch(self, texts: List[str]) -> np.ndarray:
-        model = self._get_model()
-        return model.encode(texts, convert_to_numpy=True)
-
-
 class OpenAIEmbeddingProvider(EmbeddingProvider):
-    """OpenAI embeddings (text-embedding-3-small/large)."""
+    """OpenAI-compatible embeddings (works with OpenAI, GitHub Models, Azure, etc.)."""
     
-    def __init__(self, api_key: str = None, model: str = None):
+    def __init__(
+        self,
+        api_key: str = None,
+        model: str = None,
+        base_url: str = None,
+        embedding_dim: int = None
+    ):
         self.api_key = api_key or settings.openai_api_key
         self.model = model or settings.openai_embedding_model
+        self.base_url = base_url or settings.openai_base_url
+        self._embedding_dim = embedding_dim or settings.openai_embedding_dim
         self._client = None
     
     def _get_client(self):
         """Lazy load the OpenAI client."""
         if self._client is None:
             from openai import OpenAI
-            self._client = OpenAI(api_key=self.api_key, base_url=settings.openai_base_url)
+            self._client = OpenAI(api_key=self.api_key, base_url=self.base_url)
         return self._client
     
     @property
     def dim(self) -> int:
-        return settings.openai_embedding_dim
+        return self._embedding_dim
     
     def embed_text(self, text: str) -> np.ndarray:
         client = self._get_client()
@@ -90,21 +69,27 @@ class OpenAIEmbeddingProvider(EmbeddingProvider):
 
 
 def get_embedding_provider(
-    provider: str = None,
     api_key: Optional[str] = None,
-    model: Optional[str] = None
+    model: Optional[str] = None,
+    base_url: Optional[str] = None,
+    embedding_dim: Optional[int] = None
 ) -> EmbeddingProvider:
     """
-    Factory function to get the configured embedding provider.
+    Factory function to get embedding provider.
+    
+    Uses OpenAI-compatible API. Settings priority:
+    1. Explicit parameters (from user settings in DB)
+    2. Environment defaults (from .env)
     
     Args:
-        provider: "local" or "openai" (defaults to config setting)
-        api_key: OpenAI API key (only needed for openai provider)
-        model: Embedding model name (only for openai provider)
+        api_key: API key for the embedding service
+        model: Embedding model name
+        base_url: API base URL
+        embedding_dim: Embedding dimension
     """
-    provider = provider or settings.embedding_provider
-    
-    if provider == "openai":
-        return OpenAIEmbeddingProvider(api_key=api_key, model=model)
-    else:
-        return LocalEmbeddingProvider()
+    return OpenAIEmbeddingProvider(
+        api_key=api_key,
+        model=model,
+        base_url=base_url,
+        embedding_dim=embedding_dim
+    )
