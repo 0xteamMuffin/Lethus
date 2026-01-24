@@ -400,9 +400,10 @@ async def stream_and_capture(
 ) -> AsyncIterator[bytes]:
     """
     Stream response to client while capturing full content for storage.
-    Creates its own httpx client to manage lifecycle properly.
+    Re-serializes SSE events for HTTP/3 compatibility.
     """
     full_content = []
+    buffer = ""
     
     async with httpx.AsyncClient(timeout=120.0) as client:
         async with client.stream(
@@ -413,24 +414,49 @@ async def stream_and_capture(
         ) as response:
             if response.status_code != 200:
                 error_body = await response.aread()
-                yield f"data: {json.dumps({'error': error_body.decode()})}\n\n".encode()
+                error_event = f"data: {json.dumps({'error': error_body.decode()})}\n\n"
+                yield error_event.encode('utf-8')
                 return
             
             async for chunk in response.aiter_bytes():
-                yield chunk
+                # Accumulate in buffer for proper line parsing
+                buffer += chunk.decode('utf-8', errors='replace')
                 
-                # Parse SSE chunks to capture content
-                try:
-                    chunk_str = chunk.decode('utf-8')
-                    for line in chunk_str.split('\n'):
-                        if line.startswith('data: ') and line != 'data: [DONE]':
-                            data = json.loads(line[6:])
-                            if 'choices' in data and data['choices']:
-                                delta = data['choices'][0].get('delta', {})
-                                if 'content' in delta:
-                                    full_content.append(delta['content'])
-                except:
-                    pass
+                # Process complete lines
+                while '\n' in buffer:
+                    line, buffer = buffer.split('\n', 1)
+                    line = line.rstrip('\r')
+                    
+                    if not line:
+                        # Empty line - SSE event boundary, yield newline
+                        yield b'\n'
+                        continue
+                    
+                    if line.startswith('data: '):
+                        # Re-emit as proper SSE event with explicit newlines
+                        yield (line + '\n').encode('utf-8')
+                        
+                        # Capture content for storage
+                        if line != 'data: [DONE]':
+                            try:
+                                data = json.loads(line[6:])
+                                if 'choices' in data and data['choices']:
+                                    delta = data['choices'][0].get('delta', {})
+                                    if 'content' in delta:
+                                        full_content.append(delta['content'])
+                            except json.JSONDecodeError:
+                                pass
+                    elif line.startswith(':'):
+                        # SSE comment (keep-alive), pass through
+                        yield (line + '\n').encode('utf-8')
+            
+            # Process any remaining buffer
+            if buffer.strip():
+                if buffer.startswith('data: '):
+                    yield (buffer.rstrip() + '\n\n').encode('utf-8')
+    
+    # Ensure stream ends with proper SSE termination
+    yield b'data: [DONE]\n\n'
     
     # Store the complete interaction after stream closes
     if full_content and user_message:
@@ -635,7 +661,7 @@ async def chat_completions(request: Request, db: Session = Depends(get_db)):
         })
     
     if chat_request.stream:
-        # Streaming response - generator creates its own client
+        # Streaming response - HTTP/3 compatible SSE
         return StreamingResponse(
             stream_and_capture(
                 target_url,
@@ -647,12 +673,12 @@ async def chat_completions(request: Request, db: Session = Depends(get_db)):
                 effective_embedding_model,
                 effective_base_url
             ),
-            media_type="text/event-stream",
+            media_type="text/event-stream; charset=utf-8",
             headers={
-                "Cache-Control": "no-cache, no-transform",
-                "Connection": "keep-alive",
-                "X-Accel-Buffering": "no",  # Disable NGINX buffering
-                "Transfer-Encoding": "chunked",
+                "Cache-Control": "no-cache, no-store, must-revalidate",
+                "X-Accel-Buffering": "no",
+                "X-Content-Type-Options": "nosniff",
+                "Access-Control-Expose-Headers": ", ".join(dycp_headers.keys()),
                 **dycp_headers
             }
         )

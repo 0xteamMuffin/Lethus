@@ -228,7 +228,19 @@ export async function streamChatCompletion(
 
   try {
     while (true) {
-      const { done, value } = await reader.read();
+      let result;
+      try {
+        result = await reader.read();
+      } catch (readError) {
+        // Handle HTTP/3 stream errors gracefully - if we have content, consider it done
+        if (accumulatedContent) {
+          console.warn("Stream read error (may be normal end of stream):", readError);
+          break;
+        }
+        throw readError;
+      }
+      
+      const { done, value } = result;
       if (done) break;
 
       buffer += decoder.decode(value, { stream: true });
