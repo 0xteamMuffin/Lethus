@@ -120,6 +120,48 @@ sequenceDiagram
 * **State Management (PostgreSQL):** Acts as the immutable log. While Milvus handles fuzzy retrieval, Postgres ensures zero data loss and relational integrity for user configs and graph edges.
 * **Frontend (Next.js):** Server-side rendering to easily showcase the implementation.
 
+#### Failure Modes & Edge Cases
+
+**Milvus Unavailability**
+- Graceful degradation to pass-through mode (forwards requests directly to OpenAI)
+- Auto-reconnect with exponential backoff (5s → 30s → 2m)
+- Chat continues functioning without memory features
+
+**Cold Start (N < 2 messages)**
+- DYCP skipped, returns full message array
+- Kadane's algorithm requires N≥2 for span detection
+- <10ms overhead (entity extraction only)
+
+**Semantic Similarity Collapse**
+- All query-history similarity scores ≈ 0
+- Returns last 3 turns as minimum context
+- Logs: "No relevant spans found, using recency fallback"
+
+**Token Budget Overflow**
+- Greedy truncation: keep highest-scoring spans first
+- Single span > max_tokens splits at message boundary
+- Response header: `X-Lethus-Truncated: true`
+
+**Concurrent Write Conflicts**
+- PostgreSQL SERIALIZABLE isolation prevents dirty writes
+- Second request waits ~20ms for lock release
+- Logs warning if wait time >100ms
+
+**OpenAI API Failure**
+- Returns upstream error to client (429, 503)
+- No automatic retry (maintains API compatibility)
+- Turn NOT saved on LLM failure (consistency guarantee)
+
+**Embeddings API Timeout**
+- Async write-back timeout doesn't block response stream
+- Returns HTTP 503 on critical path failure
+- Background retry 3x with exponential backoff
+
+**Database Connection Pool Exhaustion**
+- SQLAlchemy pool blocks when >100 concurrent requests
+- HTTP 504 after 30s timeout
+- Alert if pool utilization >80% for >5min
+
 ### 5. Ideal End State & Production Readiness
 
 If deployed as a global SaaS, Lethus leverages its decoupled proxy architecture to scale without rewriting core logic.
@@ -164,6 +206,118 @@ This implementation isolates the **hardest technical problem**: Can we mathemati
 By shipping the **Proxy + DYCP Algorithm + Ghost Graph**, we proved that "Signal-Based Retrieval" is not just academic theory, it is a viable, high-performance architecture that can run on a standard laptop today. We demonstrated that you don't need massive context windows to have perfect memory; you just need better signal processing.
 
 ### 7. How to Run / Demo
+
+#### Prerequisites
+- Docker and Docker Compose installed
+- Python 3.11+ (for local development)
+- Node.js 18+ (for frontend)
+
+#### Quick Start (Docker - Recommended)
+
+1. **Clone and navigate to the repository**
+```bash
+git clone <repository-url>
+cd lethus-ai
+```
+
+2. **Set up environment variables**
+```bash
+cp .env.example .env
+# Add your OpenAI API key to .env
+```
+
+3. **Start all services**
+```bash
+cd docker
+docker-compose up -d
+```
+
+This will start:
+- PostgreSQL (port 5432)
+- Milvus vector database (port 19530)
+- Lethus API backend (port 8000)
+
+4. **Initialize the database**
+```bash
+cd ..
+python -m lethus.storage.postgres  # Creates tables
+```
+
+5. **Start the frontend**
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Access the UI at `http://localhost:3000`
+
+#### Alternative: Local Development
+
+1. **Install Python dependencies**
+```bash
+python -m venv .venv
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+pip install -e .
+```
+
+2. **Start services (with Docker)**
+```bash
+cd docker
+docker-compose up -d postgres etcd minio milvus-standalone
+```
+
+3. **Run the backend**
+```bash
+lethus  # Starts FastAPI on port 8000
+```
+
+4. **Run the frontend** (in separate terminal)
+```bash
+cd frontend
+npm run dev
+```
+
+#### Demo Scenarios
+
+**Scenario 1: Basic Context Pruning**
+Run the example script to see DYCP in action:
+```bash
+python examples/07_comparison_demo.py
+```
+
+This demonstrates:
+- A 50-turn conversation being reduced to relevant spans
+- Token savings (typically 60-80% reduction)
+- Context comparison output saved to `context_logs/`
+
+**Scenario 2: Proxy Usage (OpenAI-Compatible)**
+```bash
+python examples/06_proxy_usage.py
+```
+
+Shows how to use Lethus as a drop-in replacement for OpenAI's API endpoint.
+
+**Scenario 3: Interactive Chat with UI**
+1. Open `http://localhost:3000`
+2. Configure your OpenAI API key in Settings
+3. Start a conversation
+4. Notice the DYCP statistics showing token reduction after each response
+
+#### Verifying the System
+
+Check that all services are running:
+```bash
+docker ps  # Should show postgres, milvus, etcd, minio containers
+curl http://localhost:8000/health  # Backend health check
+curl http://localhost:3000  # Frontend should respond
+```
+
+View DYCP stats in action:
+- Chat logs show original vs reduced message counts
+- `context_logs/` directory contains JSON comparisons
+- Frontend displays reduction percentages after each message
+
 
 ### 8. Notes on AI Usage
 

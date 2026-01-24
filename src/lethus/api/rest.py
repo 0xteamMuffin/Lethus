@@ -1,7 +1,3 @@
-"""
-Lethus OpenAI-Compatible Proxy Server.
-Drop-in replacement for OpenAI API with DYCP context reduction.
-"""
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
@@ -14,7 +10,6 @@ from .rest_routes import router as rest_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Lifecycle management"""
     init_db()
     yield
 
@@ -53,16 +48,13 @@ app.add_middleware(
     ],
 )
 
-# OpenAI-compatible proxy routes
 app.include_router(proxy_router, prefix="/v1", tags=["OpenAI API"])
 
-# REST API routes
 app.include_router(rest_router, prefix="/api", tags=["REST API"])
 
 
 @app.get("/")
 async def root():
-    """Health check"""
     return {
         "status": "healthy",
         "service": "Lethus Proxy",
@@ -71,7 +63,6 @@ async def root():
 
 
 def main():
-    """Entry point for proxy server"""
     import uvicorn
     uvicorn.run(
         "lethus.api.rest:app",
