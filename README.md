@@ -40,7 +40,7 @@ To ensure adoption, we assume we cannot force developers to rewrite their applic
 **Real-World Assumptions**
 
 * **Locality of Reference:**
-We assume human dialogue follows "bursty" patterns—users tend to discuss a specific topic for several turns before switching. This validates the use of Kadane's Algorithm to find contiguous spans rather than scattered sentences.
+We assume human dialogue follows "bursty" patterns, users tend to discuss a specific topic for several turns before switching. This validates the use of Kadane's Algorithm to find contiguous spans rather than scattered sentences.
 * **The "Semantic Decay" Hypothesis:**
 We assume that in the absence of explicit recall triggers, recent information is exponentially more relevant than older information. A variable defined 5 minutes ago is more likely to be used now than one defined 5 days ago.
 * **Economic Rationality:**
@@ -52,7 +52,7 @@ We assume that developers prioritize **predictable cost** over **infinite memory
 **The Core Idea: Conversation as a Signal**
 We reject the industry-standard "Search Engine" approach to memory (RAG). Instead of treating a conversation as a "bag of scattered facts," Lethus treats it as a **continuous temporal signal**.
 
-Our solution, **Dynamic Context Pruning (DYCP)**, applies signal processing techniques—specifically a modified **Kadane’s Algorithm** to the conversation history. We calculate a "relevance waveform" for the entire dialogue and surgically extract the high-signal *episodes*, preserving the causal structure (Context → Problem → Solution) that standard retrieval destroys.
+Our solution, **Dynamic Context Pruning (DYCP)**, applies signal processing techniques, specifically a modified **Kadane’s Algorithm** to the conversation history. We calculate a "relevance waveform" for the entire dialogue and surgically extract the high-signal *episodes*, preserving the causal structure (Context → Problem → Solution) that standard retrieval destroys.
 
 **The 3-Pillar Architecture:**
 
@@ -173,7 +173,7 @@ We utilized AI tools ( Claude 4.5 Sonnet) strictly as accelerators for implement
 
 * **System Design:** The decision to architect Lethus as a "Man-in-the-Middle" proxy rather than a client-side library.
 * **Constraint Selection:** The choice to strictly enforce a <200ms latency budget, necessitating the use of SpaCy (CPU) over LLMs for entity extraction.
-* **Algorithm Adaptation:** The conceptual mapping of **Kadane’s Algorithm** traditionally used for maximum subarray problems—to the domain of conversational relevance scoring.
+* **Algorithm Adaptation:** The conceptual mapping of **Kadane’s Algorithm** traditionally used for maximum subarray problems, to the domain of conversational relevance scoring.
 
 
 * **AI-Assisted Implementation:**
