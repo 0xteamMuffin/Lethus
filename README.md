@@ -85,7 +85,11 @@ This starts:
 ```bash
 # Create and activate virtual environment
 python -m venv .venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+
+# Activate (choose one):
+source .venv/Scripts/activate  # Git Bash on Windows
+source .venv/bin/activate      # Linux/macOS
+.venv\Scripts\activate         # Windows CMD/PowerShell
 
 # Install package
 pip install -e .
