@@ -5,8 +5,9 @@ Handles conversations, messages, and user settings.
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from datetime import datetime
+import httpx
 
 from ..storage.postgres import get_db, Conversation, Turn, User
 from ..config import settings
@@ -19,13 +20,40 @@ router = APIRouter()
 class UserSettingsRequest(BaseModel):
     user_id: str
     openai_api_key: Optional[str] = None
+    llm_model: Optional[str] = None  # Selected LLM model (None = use env default)
+    embedding_model: Optional[str] = None  # Selected embedding model (None = use env default)
 
 
 class UserSettingsResponse(BaseModel):
     user_id: str
     has_api_key: bool
+    llm_model: Optional[str] = None  # User's selected LLM model
+    embedding_model: Optional[str] = None  # User's selected embedding model
+    default_llm_model: str  # Env default LLM model
+    default_embedding_model: str  # Env default embedding model
     created_at: datetime
     updated_at: datetime
+
+
+class ModelInfo(BaseModel):
+    id: str
+    object: str = "model"
+    owned_by: str = "openai"
+    created: Optional[int] = None
+
+
+class AvailableModelsResponse(BaseModel):
+    llm_models: List[ModelInfo]
+    embedding_models: List[ModelInfo]
+
+
+class ValidateApiKeyRequest(BaseModel):
+    api_key: str
+
+
+class ValidateApiKeyResponse(BaseModel):
+    valid: bool
+    error: Optional[str] = None
 
 
 class ConversationRequest(BaseModel):
@@ -62,7 +90,7 @@ class TurnRequest(BaseModel):
 
 @router.post("/settings", response_model=UserSettingsResponse)
 async def save_user_settings(request: UserSettingsRequest, db: Session = Depends(get_db)):
-    """Save or update user settings including API key"""
+    """Save or update user settings including API key and model preferences"""
     # Find or create user
     user = db.query(User).filter(User.user_id == request.user_id).first()
     
@@ -75,12 +103,26 @@ async def save_user_settings(request: UserSettingsRequest, db: Session = Depends
         user.openai_api_key = request.openai_api_key
         user.updated_at = datetime.utcnow()
     
+    # Update LLM model if provided (empty string clears it to use default)
+    if request.llm_model is not None:
+        user.llm_model = request.llm_model if request.llm_model else None
+        user.updated_at = datetime.utcnow()
+    
+    # Update embedding model if provided (empty string clears it to use default)
+    if request.embedding_model is not None:
+        user.embedding_model = request.embedding_model if request.embedding_model else None
+        user.updated_at = datetime.utcnow()
+    
     db.commit()
     db.refresh(user)
     
     return UserSettingsResponse(
         user_id=user.user_id,
         has_api_key=bool(user.openai_api_key),
+        llm_model=user.llm_model,
+        embedding_model=user.embedding_model,
+        default_llm_model=settings.llm_model,
+        default_embedding_model=settings.openai_embedding_model,
         created_at=user.created_at,
         updated_at=user.updated_at
     )
@@ -96,6 +138,10 @@ async def get_user_settings(user_id: str, db: Session = Depends(get_db)):
         return UserSettingsResponse(
             user_id=user_id,
             has_api_key=False,
+            llm_model=None,
+            embedding_model=None,
+            default_llm_model=settings.llm_model,
+            default_embedding_model=settings.openai_embedding_model,
             created_at=datetime.utcnow(),
             updated_at=datetime.utcnow()
         )
@@ -103,9 +149,112 @@ async def get_user_settings(user_id: str, db: Session = Depends(get_db)):
     return UserSettingsResponse(
         user_id=user.user_id,
         has_api_key=bool(user.openai_api_key),
+        llm_model=user.llm_model,
+        embedding_model=user.embedding_model,
+        default_llm_model=settings.llm_model,
+        default_embedding_model=settings.openai_embedding_model,
         created_at=user.created_at,
         updated_at=user.updated_at
     )
+
+
+@router.post("/settings/validate-api-key", response_model=ValidateApiKeyResponse)
+async def validate_api_key(request: ValidateApiKeyRequest):
+    """Validate an API key by making a minimal chat completion request"""
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                f"{settings.openai_base_url}/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {request.api_key}",
+                    "Content-Type": "application/json"
+                },
+                json={
+                    "model": settings.llm_model,
+                    "messages": [{"role": "user", "content": "Hi"}],
+                    "max_tokens": 1
+                }
+            )
+            
+            if response.status_code == 200:
+                return ValidateApiKeyResponse(valid=True)
+            elif response.status_code == 401:
+                return ValidateApiKeyResponse(valid=False, error="Invalid API key")
+            else:
+                return ValidateApiKeyResponse(
+                    valid=False, 
+                    error=f"API error: {response.status_code}"
+                )
+    except httpx.TimeoutException:
+        return ValidateApiKeyResponse(valid=False, error="Request timed out")
+    except Exception as e:
+        return ValidateApiKeyResponse(valid=False, error=str(e))
+
+
+@router.get("/settings/{user_id}/models", response_model=AvailableModelsResponse)
+async def get_available_models(user_id: str, db: Session = Depends(get_db)):
+    """
+    Try to fetch available models from the API.
+    Falls back to empty lists if API doesn't support /models endpoint.
+    """
+    user = db.query(User).filter(User.user_id == user_id).first()
+    
+    if not user or not user.openai_api_key:
+        return AvailableModelsResponse(llm_models=[], embedding_models=[])
+    
+    base_url = settings.openai_base_url.rstrip("/")
+    
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(
+                f"{base_url}/models",
+                headers={
+                    "Authorization": f"Bearer {user.openai_api_key}",
+                    "Content-Type": "application/json"
+                }
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                models_data = data.get("data", [])
+                
+                llm_models = []
+                embedding_models = []
+                
+                for model in models_data:
+                    model_id = model.get("id", "")
+                    # Categorize models based on common naming patterns
+                    if "embed" in model_id.lower():
+                        embedding_models.append(model_id)
+                    else:
+                        llm_models.append(model_id)
+                
+                return AvailableModelsResponse(
+                    llm_models=sorted(llm_models),
+                    embedding_models=sorted(embedding_models)
+                )
+            else:
+                # API doesn't support /models - return empty lists
+                return AvailableModelsResponse(llm_models=[], embedding_models=[])
+                
+    except Exception as e:
+        # Any error - just return empty, user can type custom model names
+        return AvailableModelsResponse(llm_models=[], embedding_models=[])
+
+
+@router.delete("/settings/{user_id}/api-key")
+async def delete_api_key(user_id: str, db: Session = Depends(get_db)):
+    """Remove the user's API key"""
+    user = db.query(User).filter(User.user_id == user_id).first()
+    
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    user.openai_api_key = None
+    user.updated_at = datetime.utcnow()
+    db.commit()
+    
+    return {"message": "API key removed successfully"}
 
 
 # === Conversation Endpoints ===
