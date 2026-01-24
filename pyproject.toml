@@ -11,12 +11,7 @@ dependencies = [
     "pydantic-settings>=2.1.0",
     "python-dotenv>=1.0.0",
     
-    # Embeddings - Local (default)
-    "sentence-transformers>=2.2.0",
-    "torch>=2.0.0",
-    "einops>=0.7.0",  # Required for nomic-embed
-    
-    # Embeddings - OpenAI (optional)
+    # Embeddings - OpenAI (default for production)
     "openai>=1.10.0",
     "tiktoken>=0.5.2",
     
@@ -40,6 +35,12 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+local = [
+    # For local embeddings (optional - use OpenAI instead)
+    "sentence-transformers>=2.2.0",
+    "torch>=2.0.0",
+    "einops>=0.7.0",
+]
 dev = [
     "pytest>=7.0.0",
     "pytest-asyncio>=0.21.0",

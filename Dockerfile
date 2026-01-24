@@ -17,29 +17,13 @@ RUN pip install --no-cache-dir --upgrade pip
 
 # Copy and install Python dependencies first (better caching)
 COPY pyproject.toml ./
+COPY src ./src
 
-# Install dependencies with binary wheels (no compilation needed)
-RUN pip install --no-cache-dir \
-    numpy \
-    pydantic \
-    pydantic-settings \
-    python-dotenv \
-    openai \
-    tiktoken \
-    pymilvus \
-    spacy \
-    httpx \
-    fastapi \
-    "uvicorn[standard]" \
-    sqlalchemy \
-    psycopg2-binary \
-    python-multipart
+# Install the package (makes lethus module importable)
+RUN pip install --no-cache-dir .
 
 # Download spaCy model
 RUN python -m spacy download en_core_web_sm
-
-# Copy application code
-COPY src ./src
 
 # Create non-root user
 RUN useradd --create-home --shell /bin/bash lethus
@@ -48,8 +32,8 @@ USER lethus
 # Expose port
 EXPOSE 8000
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+# Health check - longer start period for initialization
+HEALTHCHECK --interval=30s --timeout=10s --start-period=120s --retries=5 \
     CMD curl -f http://localhost:8000/health || exit 1
 
 # Run the application
