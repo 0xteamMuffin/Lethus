@@ -331,34 +331,49 @@ async def store_interaction(
 
 
 async def stream_and_capture(
-    response: httpx.Response,
+    target_url: str,
+    forward_body: dict,
+    headers: dict,
     conversation_id: int,
     user_message: str,
     api_key: str
 ) -> AsyncIterator[bytes]:
     """
     Stream response to client while capturing full content for storage.
+    Creates its own httpx client to manage lifecycle properly.
     """
     full_content = []
     
-    async for chunk in response.aiter_bytes():
-        yield chunk
-        
-        # Parse SSE chunks to capture content
-        try:
-            chunk_str = chunk.decode('utf-8')
-            for line in chunk_str.split('\n'):
-                if line.startswith('data: ') and line != 'data: [DONE]':
-                    data = json.loads(line[6:])
-                    if 'choices' in data and data['choices']:
-                        delta = data['choices'][0].get('delta', {})
-                        if 'content' in delta:
-                            full_content.append(delta['content'])
-        except:
-            pass
+    async with httpx.AsyncClient(timeout=120.0) as client:
+        async with client.stream(
+            "POST",
+            target_url,
+            json=forward_body,
+            headers=headers
+        ) as response:
+            if response.status_code != 200:
+                error_body = await response.aread()
+                yield f"data: {json.dumps({'error': error_body.decode()})}\n\n".encode()
+                return
+            
+            async for chunk in response.aiter_bytes():
+                yield chunk
+                
+                # Parse SSE chunks to capture content
+                try:
+                    chunk_str = chunk.decode('utf-8')
+                    for line in chunk_str.split('\n'):
+                        if line.startswith('data: ') and line != 'data: [DONE]':
+                            data = json.loads(line[6:])
+                            if 'choices' in data and data['choices']:
+                                delta = data['choices'][0].get('delta', {})
+                                if 'content' in delta:
+                                    full_content.append(delta['content'])
+                except:
+                    pass
     
-    # Store the complete interaction
-    if full_content:
+    # Store the complete interaction after stream closes
+    if full_content and user_message:
         assistant_message = ''.join(full_content)
         await store_interaction(
             conversation_id,
@@ -433,9 +448,10 @@ async def chat_completions(request: Request, db: Session = Depends(get_db)):
     # Log detailed stats
     stats.log()
     
-    # Build forwarded request
+    # Build forwarded request - remove user_id as OpenAI doesn't accept it
     forward_body = body.copy()
     forward_body["messages"] = reduced_messages
+    forward_body.pop("user_id", None)
     
     # Determine target URL based on model
     model = chat_request.model.lower()
@@ -467,64 +483,53 @@ async def chat_completions(request: Request, db: Session = Depends(get_db)):
         "X-Lethus-Processing-Ms": f"{stats.processing_time_ms:.2f}",
     }
     
+    if chat_request.stream:
+        # Streaming response - generator creates its own client
+        return StreamingResponse(
+            stream_and_capture(
+                target_url,
+                forward_body,
+                headers,
+                conversation_id,
+                last_user_msg,
+                api_key
+            ),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                **dycp_headers
+            }
+        )
+    
+    # Non-streaming response
     async with httpx.AsyncClient(timeout=120.0) as client:
-        if chat_request.stream:
-            # Streaming response
-            async with client.stream(
-                "POST",
-                target_url,
-                json=forward_body,
-                headers=headers
-            ) as response:
-                if response.status_code != 200:
-                    error_body = await response.aread()
-                    raise HTTPException(
-                        status_code=response.status_code,
-                        detail=error_body.decode()
-                    )
-                
-                return StreamingResponse(
-                    stream_and_capture(
-                        response,
-                        conversation_id,
-                        last_user_msg,
-                        api_key
-                    ),
-                    media_type="text/event-stream",
-                    headers={
-                        "Cache-Control": "no-cache",
-                        "Connection": "keep-alive",
-                        **dycp_headers
-                    }
-                )
-        else:
-            # Non-streaming response
-            response = await client.post(
-                target_url,
-                json=forward_body,
-                headers=headers
+        response = await client.post(
+            target_url,
+            json=forward_body,
+            headers=headers
+        )
+        
+        if response.status_code != 200:
+            raise HTTPException(
+                status_code=response.status_code,
+                detail=response.text
             )
-            
-            if response.status_code != 200:
-                raise HTTPException(
-                    status_code=response.status_code,
-                    detail=response.text
-                )
-            
-            result = response.json()
-            
-            # Store interaction
-            if last_user_msg and result.get("choices"):
-                assistant_msg = result["choices"][0]["message"]["content"]
-                await store_interaction(
-                    conversation_id,
-                    last_user_msg,
-                    assistant_msg,
-                    api_key
-                )
-            
-            # Return with DYCP stats headers
-            return JSONResponse(content=result, headers=dycp_headers)
+        
+        result = response.json()
+        
+        # Store interaction
+        if last_user_msg and result.get("choices"):
+            assistant_msg = result["choices"][0]["message"]["content"]
+            await store_interaction(
+                conversation_id,
+                last_user_msg,
+                assistant_msg,
+                api_key
+            )
+        
+        # Return with DYCP stats headers
+        return JSONResponse(content=result, headers=dycp_headers)
 
 
 @router.get("/models")
