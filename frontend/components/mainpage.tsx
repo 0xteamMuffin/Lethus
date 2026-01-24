@@ -5,12 +5,16 @@ import {
   ArrowUp,
   Menu,
   Settings,
+  Zap,
+  ZapOff,
 } from "lucide-react";
 import { toast, Toaster } from "sonner";
 import {
   streamChatCompletion,
   getConversationTurns,
+  getConversation,
   createConversation,
+  updateConversation,
   type Turn,
   type ChatMessage as APIChatMessage,
   type DYCPStats,
@@ -33,6 +37,7 @@ interface Message {
   sender: "user" | "ai";
   timestamp: string;
   thinking?: string;
+  dycpStats?: DYCPStats;  // Stats for AI messages
 }
 
 const LibreChatInterface: React.FC<LibreChatInterfaceProps> = ({
@@ -55,6 +60,8 @@ const LibreChatInterface: React.FC<LibreChatInterfaceProps> = ({
   const [streamingMessageId, setStreamingMessageId] = useState<string | null>(
     null,
   );
+  const [enhancedMode, setEnhancedMode] = useState<boolean>(true);  // Default to enhanced
+  const [enhancedModeLocked, setEnhancedModeLocked] = useState<boolean>(false);  // Lock after first enhanced message
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const streamingMessageRef = useRef<string>("");
@@ -86,12 +93,29 @@ const LibreChatInterface: React.FC<LibreChatInterfaceProps> = ({
       setConversationId(propConversationId);
       if (propConversationId) {
         loadConversationHistory(propConversationId);
+        // Load conversation metadata including enhanced_mode
+        loadConversationMetadata(propConversationId);
       } else {
+        // New conversation - reset state
         setMessages([]);
         setChatHistory([]);
+        setEnhancedMode(true);
+        setEnhancedModeLocked(false);
       }
     }
   }, [propConversationId]);
+
+  // Load conversation metadata (enhanced_mode)
+  const loadConversationMetadata = async (convId: number) => {
+    try {
+      const conv = await getConversation(convId);
+      setEnhancedMode(conv.enhanced_mode);
+      // Lock toggle if enhanced mode is already on (can't turn off)
+      setEnhancedModeLocked(conv.enhanced_mode);
+    } catch (error) {
+      console.error("Failed to load conversation metadata:", error);
+    }
+  };
 
   // Load conversation history
   const loadConversationHistory = async (convId: number) => {
@@ -243,11 +267,19 @@ const LibreChatInterface: React.FC<LibreChatInterfaceProps> = ({
         const conv = await createConversation(
           getUserId(),
           messageToSend.slice(0, 50),
+          enhancedMode,  // Pass enhanced_mode when creating
         );
         currentConvId = conv.id;
         setConversationId(currentConvId);
         onConversationCreated?.(currentConvId);
+        // Lock toggle if enhanced mode is on
+        if (enhancedMode) {
+          setEnhancedModeLocked(true);
+        }
       }
+
+      // Track stats for this message
+      let responseStats: DYCPStats | null = null;
 
       await streamChatCompletion(
         {
@@ -255,6 +287,8 @@ const LibreChatInterface: React.FC<LibreChatInterfaceProps> = ({
           userId: getUserId(),
           model: userModel || undefined,
           stream: true,
+          conversationId: currentConvId,
+          enhancedMode: enhancedMode,
         },
         (chunk) => {
           streamingMessageRef.current += chunk;
@@ -269,6 +303,22 @@ const LibreChatInterface: React.FC<LibreChatInterfaceProps> = ({
         (stats) => {
           setStreamingMessageId(null);
           setLastDycpStats(stats);
+          responseStats = stats;
+          
+          // Update message with final stats
+          setMessages((prev) =>
+            prev.map((msg) =>
+              msg.id === aiMessageId
+                ? { ...msg, dycpStats: stats }
+                : msg,
+            ),
+          );
+          
+          // Lock toggle after first enhanced response
+          if (stats.enhancedMode) {
+            setEnhancedModeLocked(true);
+          }
+          
           if (stats.tokensSaved > 0) {
             toast.success(
               `DYCP saved ~${stats.tokensSaved.toLocaleString()} tokens`,
@@ -349,6 +399,36 @@ const LibreChatInterface: React.FC<LibreChatInterfaceProps> = ({
         </div>
 
         <div className="flex items-center gap-2">
+          {/* Enhanced Mode Toggle */}
+          <button
+            onClick={() => {
+              if (!enhancedModeLocked) {
+                const newMode = !enhancedMode;
+                setEnhancedMode(newMode);
+                // Update conversation in DB if it exists
+                if (conversationId && newMode) {
+                  updateConversation(conversationId, { enhanced_mode: newMode });
+                  setEnhancedModeLocked(true);  // Lock after enabling
+                }
+              }
+            }}
+            disabled={enhancedModeLocked}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all duration-200 ${
+              enhancedMode
+                ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"
+                : "bg-[#1a1a1a] text-gray-400 border border-[#2a2a2a] hover:text-white"
+            } ${enhancedModeLocked ? "opacity-60 cursor-not-allowed" : "cursor-pointer hover:opacity-80"}`}
+            title={enhancedModeLocked 
+              ? "Enhanced mode is locked for this conversation" 
+              : enhancedMode 
+                ? "Enhanced mode: DYCP + Ghost Graph active" 
+                : "Normal mode: Direct passthrough"
+            }
+          >
+            {enhancedMode ? <Zap size={14} /> : <ZapOff size={14} />}
+            <span className="hidden sm:inline">{enhancedMode ? "Enhanced" : "Normal"}</span>
+          </button>
+          
           <button
             onClick={() => setIsSettingsOpen(true)}
             className="p-2 rounded-lg hover:bg-[#1a1a1a] hover:text-white transition-all duration-200"
@@ -417,6 +497,7 @@ const LibreChatInterface: React.FC<LibreChatInterfaceProps> = ({
                 timestamp={msg.timestamp}
                 isStreaming={msg.id === streamingMessageId}
                 thinking={msg.thinking}
+                dycpStats={msg.dycpStats}
               />
             ))}
             <div ref={messagesEndRef} />

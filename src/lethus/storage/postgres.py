@@ -39,6 +39,7 @@ class Conversation(Base):
     user_id = Column(String(255), index=True)
     title = Column(String(500))
     ghost_graph_json = Column(Text, default="{}")  # Serialized Ghost Graph
+    enhanced_mode = Column(Boolean, default=True)  # True = use DYCP/Ghost Graph, False = normal passthrough
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

@@ -74,14 +74,21 @@ class ValidateApiKeyResponse(BaseModel):
 class ConversationRequest(BaseModel):
     user_id: str
     title: Optional[str] = "New Conversation"
+    enhanced_mode: Optional[bool] = True  # True = use DYCP/Ghost Graph
 
 
 class ConversationResponse(BaseModel):
     id: int
     user_id: str
     title: str
+    enhanced_mode: bool
     created_at: datetime
     updated_at: datetime
+
+
+class ConversationUpdateRequest(BaseModel):
+    title: Optional[str] = None
+    enhanced_mode: Optional[bool] = None
 
 
 class TurnResponse(BaseModel):
@@ -330,7 +337,8 @@ async def create_conversation(request: ConversationRequest, db: Session = Depend
     """Create a new conversation"""
     conversation = Conversation(
         user_id=request.user_id,
-        title=request.title
+        title=request.title,
+        enhanced_mode=request.enhanced_mode if request.enhanced_mode is not None else True
     )
     db.add(conversation)
     db.commit()
@@ -340,6 +348,7 @@ async def create_conversation(request: ConversationRequest, db: Session = Depend
         id=conversation.id,
         user_id=conversation.user_id,
         title=conversation.title,
+        enhanced_mode=conversation.enhanced_mode,
         created_at=conversation.created_at,
         updated_at=conversation.updated_at
     )
@@ -357,6 +366,7 @@ async def get_user_conversations(user_id: str, db: Session = Depends(get_db)):
             id=conv.id,
             user_id=conv.user_id,
             title=conv.title,
+            enhanced_mode=conv.enhanced_mode if conv.enhanced_mode is not None else True,
             created_at=conv.created_at,
             updated_at=conv.updated_at
         )
@@ -378,6 +388,38 @@ async def get_conversation(conversation_id: int, db: Session = Depends(get_db)):
         id=conversation.id,
         user_id=conversation.user_id,
         title=conversation.title,
+        enhanced_mode=conversation.enhanced_mode if conversation.enhanced_mode is not None else True,
+        created_at=conversation.created_at,
+        updated_at=conversation.updated_at
+    )
+
+
+@router.patch("/conversations/{conversation_id}", response_model=ConversationResponse)
+async def update_conversation(conversation_id: int, request: ConversationUpdateRequest, db: Session = Depends(get_db)):
+    """Update a conversation (title or enhanced_mode). Note: enhanced_mode can only be turned ON, not OFF."""
+    conversation = db.query(Conversation).filter(
+        Conversation.id == conversation_id
+    ).first()
+    
+    if not conversation:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    
+    if request.title is not None:
+        conversation.title = request.title
+    
+    # enhanced_mode can only be turned ON (True), once on it stays on
+    if request.enhanced_mode is True and not conversation.enhanced_mode:
+        conversation.enhanced_mode = True
+    
+    conversation.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(conversation)
+    
+    return ConversationResponse(
+        id=conversation.id,
+        user_id=conversation.user_id,
+        title=conversation.title,
+        enhanced_mode=conversation.enhanced_mode if conversation.enhanced_mode is not None else True,
         created_at=conversation.created_at,
         updated_at=conversation.updated_at
     )

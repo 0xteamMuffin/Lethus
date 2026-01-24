@@ -32,6 +32,25 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=[
+        "X-Lethus-Enhanced-Mode",
+        "X-Lethus-Original-Messages",
+        "X-Lethus-Reduced-Messages",
+        "X-Lethus-Original-Tokens",
+        "X-Lethus-Reduced-Tokens",
+        "X-Lethus-Tokens-Saved",
+        "X-Lethus-Reduction-Percent",
+        "X-Lethus-Spans-Found",
+        "X-Lethus-Processing-Ms",
+        "X-Lethus-Ghost-Entities",
+        "X-Lethus-Ghost-Boosts",
+        "X-Lethus-Decay-Lambda",
+        "X-Lethus-Tau",
+        "X-Lethus-Theta",
+        "X-Lethus-Entity-Names",
+        "X-Lethus-Span-Details",
+        "X-Lethus-Boost-Count",
+    ],
 )
 
 # OpenAI-compatible proxy routes

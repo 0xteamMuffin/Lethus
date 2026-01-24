@@ -22,7 +22,7 @@ import numpy as np
 
 from ..config import settings
 from ..storage.milvus import get_milvus_storage
-from ..storage.postgres import get_db, User
+from ..storage.postgres import get_db, User, Conversation
 from ..core.dycp import DYCPCore
 from ..core.ghost_graph import GhostGraph
 from ..core.embeddings import get_embedding_provider
@@ -49,6 +49,13 @@ class DYCPStats:
     ghost_graph_boosts: int = 0
     decay_lambda: float = 0.0
     processing_time_ms: float = 0.0
+    # Extended dev info
+    enhanced_mode: bool = True
+    entity_names: List[str] = field(default_factory=list)  # List of detected entities
+    boost_details: List[dict] = field(default_factory=list)  # Entity boost breakdown
+    tau: float = 0.0  # Gain threshold used
+    theta: float = 0.0  # Stopping threshold used
+    similarity_scores: List[float] = field(default_factory=list)  # Per-turn similarity scores
     
     @property
     def tokens_saved(self) -> int:
@@ -160,6 +167,26 @@ from .models import (
     ChatCompletionResponse
 )
 
+# Extended request model for proxy (adds enhanced_mode and conversation_id)
+from pydantic import BaseModel
+from typing import List as TypingList
+
+class ProxyChatCompletionRequest(BaseModel):
+    """Extended chat completion request with Lethus-specific fields"""
+    model: str
+    messages: TypingList[ChatMessage]
+    temperature: Optional[float] = 0.7
+    max_tokens: Optional[int] = None
+    stream: Optional[bool] = False
+    top_p: Optional[float] = 1.0
+    frequency_penalty: Optional[float] = 0.0
+    presence_penalty: Optional[float] = 0.0
+    stop: Optional[TypingList[str]] = None
+    user: Optional[str] = None
+    user_id: Optional[str] = None  # For database API key lookup
+    conversation_id: Optional[int] = None  # For fetching enhanced_mode from DB
+    enhanced_mode: Optional[bool] = None  # Override: True = DYCP, False = passthrough
+
 
 # === Core DYCP Logic ===
 
@@ -250,17 +277,21 @@ def apply_dycp_reduction(
     # Ghost Graph boost
     history_with_entities = []
     total_entities = 0
+    all_entity_names = []
     for i, m in enumerate(history):
         entities = ghost_graph.extract_entities(m["content"])
         total_entities += len(entities)
+        entity_names = [e["name"] for e in entities]
+        all_entity_names.extend(entity_names)
         history_with_entities.append({
             "role": m["role"],
             "content": m["content"],
             "turn_index": i,
-            "entities": json.dumps([e["name"] for e in entities])
+            "entities": json.dumps(entity_names)
         })
     
     stats.ghost_graph_entities = total_entities
+    stats.entity_names = list(set(all_entity_names))  # Unique entities
     
     # Track boosts
     original_similarities = similarities.copy()
@@ -269,7 +300,24 @@ def apply_dycp_reduction(
         history_with_entities,
         similarities
     )
-    stats.ghost_graph_boosts = int(np.sum(similarities > original_similarities))
+    
+    # Calculate boost details
+    boost_details = []
+    for i, (orig, boosted) in enumerate(zip(original_similarities, similarities)):
+        if boosted > orig:
+            boost_details.append({
+                "turn": i,
+                "original": float(orig),
+                "boosted": float(boosted),
+                "delta": float(boosted - orig)
+            })
+    
+    stats.ghost_graph_boosts = len(boost_details)
+    stats.boost_details = boost_details
+    stats.similarity_scores = [float(s) for s in similarities]
+    stats.tau = settings.dycp_tau
+    stats.theta = settings.dycp_theta
+    stats.enhanced_mode = True
     
     # Get spans using Kadane's Algorithm
     spans = dycp.get_pruned_indices(similarities)
@@ -456,9 +504,23 @@ async def chat_completions(request: Request, db: Session = Depends(get_db)):
     
     # Parse and validate request
     try:
-        chat_request = ChatCompletionRequest(**body)
+        chat_request = ProxyChatCompletionRequest(**body)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Invalid request: {e}")
+    
+    # Determine enhanced_mode from request or database
+    # Priority: request body > conversation in DB > default (True)
+    enhanced_mode = True  # Default
+    db_conversation_id = chat_request.conversation_id
+    
+    if chat_request.enhanced_mode is not None:
+        # Explicit override in request
+        enhanced_mode = chat_request.enhanced_mode
+    elif db_conversation_id:
+        # Look up from database
+        conv = db.query(Conversation).filter(Conversation.id == db_conversation_id).first()
+        if conv:
+            enhanced_mode = conv.enhanced_mode if conv.enhanced_mode is not None else True
     
     # Determine effective settings (user API settings > request > env defaults)
     # Model: request model > user setting > env default
@@ -488,8 +550,8 @@ async def chat_completions(request: Request, db: Session = Depends(get_db)):
     # Convert to dicts for processing
     messages = [{"role": m.role, "content": m.content} for m in chat_request.messages]
     
-    # Get conversation ID
-    conversation_id = _get_conversation_id(messages)
+    # Get conversation ID (use DB conversation_id if provided, else generate from messages)
+    conversation_id = db_conversation_id or _get_conversation_id(messages)
     
     # Get last user message for storage later
     last_user_msg = None
@@ -498,13 +560,24 @@ async def chat_completions(request: Request, db: Session = Depends(get_db)):
             last_user_msg = m["content"]
             break
     
-    # Apply DYCP reduction with user's embedding model and base URL
-    reduced_messages, stats = apply_dycp_reduction(
-        messages, api_key, conversation_id, effective_embedding_model, effective_base_url
-    )
-    
-    # Log detailed stats
-    stats.log()
+    # Apply DYCP reduction only if enhanced_mode is True
+    if enhanced_mode:
+        reduced_messages, stats = apply_dycp_reduction(
+            messages, api_key, conversation_id, effective_embedding_model, effective_base_url
+        )
+        stats.enhanced_mode = True
+        # Log detailed stats
+        stats.log()
+    else:
+        # Passthrough mode - no DYCP, just forward messages as-is
+        stats = DYCPStats()
+        stats.original_messages = len(messages)
+        stats.reduced_messages = len(messages)
+        stats.original_tokens = estimate_messages_tokens(messages)
+        stats.reduced_tokens = stats.original_tokens
+        stats.enhanced_mode = False
+        reduced_messages = messages
+        logger.info("DYCP | Passthrough mode (enhanced_mode=False)")
     
     # Build forwarded request - use effective settings
     forward_body = body.copy()
@@ -513,6 +586,8 @@ async def chat_completions(request: Request, db: Session = Depends(get_db)):
     forward_body["temperature"] = effective_temperature
     forward_body["max_tokens"] = effective_max_tokens
     forward_body.pop("user_id", None)
+    forward_body.pop("conversation_id", None)
+    forward_body.pop("enhanced_mode", None)
     
     # Determine target URL based on model
     model = effective_llm_model.lower()
@@ -532,8 +607,9 @@ async def chat_completions(request: Request, db: Session = Depends(get_db)):
         "Content-Type": "application/json"
     }
     
-    # DYCP stats headers
+    # DYCP stats headers (basic stats always included)
     dycp_headers = {
+        "X-Lethus-Enhanced-Mode": str(stats.enhanced_mode).lower(),
         "X-Lethus-Original-Messages": str(stats.original_messages),
         "X-Lethus-Reduced-Messages": str(stats.reduced_messages),
         "X-Lethus-Original-Tokens": str(stats.original_tokens),
@@ -543,6 +619,20 @@ async def chat_completions(request: Request, db: Session = Depends(get_db)):
         "X-Lethus-Spans-Found": str(stats.spans_found),
         "X-Lethus-Processing-Ms": f"{stats.processing_time_ms:.2f}",
     }
+    
+    # Extended stats for enhanced mode (dev logs)
+    if stats.enhanced_mode:
+        dycp_headers.update({
+            "X-Lethus-Ghost-Entities": str(stats.ghost_graph_entities),
+            "X-Lethus-Ghost-Boosts": str(stats.ghost_graph_boosts),
+            "X-Lethus-Decay-Lambda": f"{stats.decay_lambda:.3f}",
+            "X-Lethus-Tau": f"{stats.tau:.3f}",
+            "X-Lethus-Theta": f"{stats.theta:.3f}",
+            # JSON-encoded extended data (for detailed dropdown)
+            "X-Lethus-Entity-Names": json.dumps(stats.entity_names[:20]),  # Limit to 20 entities
+            "X-Lethus-Span-Details": json.dumps(stats.span_details),
+            "X-Lethus-Boost-Count": str(len(stats.boost_details)),
+        })
     
     if chat_request.stream:
         # Streaming response - generator creates its own client
