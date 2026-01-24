@@ -1,0 +1,30 @@
+[tool.poetry]
+name = "lethus-memory-backend"
+version = "0.1.0"
+description = "Conversational memory system with DYCP span selection"
+authors = ["Lethus AI"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.10"
+fastapi = "^0.109.0"
+uvicorn = {extras = ["standard"], version = "^0.27.0"}
+pymilvus = "^2.3.0"
+psycopg2-binary = "^2.9.9"
+sqlalchemy = "^2.0.25"
+openai = "^1.10.0"
+tiktoken = "^0.5.2"
+pydantic = "^2.5.0"
+pydantic-settings = "^2.1.0"
+python-dotenv = "^1.0.0"
+numpy = "^1.26.0"
+scikit-learn = "^1.4.0"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^7.4.4"
+black = "^24.1.0"
+isort = "^5.13.2"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
