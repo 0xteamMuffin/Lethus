@@ -46,7 +46,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
           )}
 
           <div
-            className={`px-4 py-3 md:px-5 md:py-3.5 text-[14px] md:text-[15px] leading-6 md:leading-7 whitespace-pre-wrap ${
+            className={`px-4 py-3 md:px-5 md:py-3.5 text-[14px] md:text-[15px] leading-6 md:leading-7  ${
               isUser
                 ? "bg-[#1a1a1a] border border-[#2a2a2a] text-gray-100 rounded-2xl rounded-tr-md"
                 : "bg-transparent text-gray-200 pl-0 pt-0"
