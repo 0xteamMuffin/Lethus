@@ -2,7 +2,6 @@
 name = "lethus"
 version = "0.1.0"
 description = "Lethus - DYCP Context Reduction Proxy with Kadane's Algorithm, Semantic Decay, and Ghost Graph"
-readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
     # Core
