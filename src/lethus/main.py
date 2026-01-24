@@ -2,77 +2,84 @@
 Lethus - Main Entry Point
 
 Usage:
-    lethus --mode=mcp     # Run MCP server only
-    lethus --mode=api     # Run REST API only  
-    lethus --mode=both    # Run both (default)
+    lethus                # Run the server (default)
+    lethus --init-db      # Initialize database
     
 Or via Python:
-    python -m lethus.main --mode=api
+    python -m lethus.main
+
+The server exposes:
+    /v1/chat/completions  - OpenAI-compatible proxy with DYCP context reduction
+    /api/*                - REST API for direct integration
 """
 import argparse
-import sys
-import asyncio
-import threading
 
 
-def run_mcp_server():
-    """Run the MCP server"""
-    from .api.mcp import main as mcp_main
-    mcp_main()
-
-
-def run_rest_api():
-    """Run the REST API server"""
-    from .api.rest import main as api_main
-    api_main()
-
-
-def run_both():
-    """Run both MCP and REST API servers"""
+def run_server():
+    """Run the Lethus server with proxy and REST API."""
     import uvicorn
     from .config import settings
     
-    def start_api():
-        uvicorn.run(
-            "lethus.api.rest:app",
-            host=settings.api_host,
-            port=settings.api_port,
-            log_level="info"
-        )
+    print("=" * 60)
+    print("  LETHUS - DYCP Context Reduction Proxy")
+    print("=" * 60)
+    print(f"  Proxy endpoint: http://{settings.api_host}:{settings.api_port}/v1/chat/completions")
+    print(f"  REST API:       http://{settings.api_host}:{settings.api_port}/api/")
+    print("=" * 60)
+    print()
+    print("  To use with any OpenAI-compatible client:")
+    print(f'    base_url = "http://{settings.api_host}:{settings.api_port}/v1"')
+    print()
     
-    api_thread = threading.Thread(target=start_api, daemon=True)
-    api_thread.start()
-    
-    print(f"REST API running on http://{settings.api_host}:{settings.api_port}")
-    print("Starting MCP server...")
-    
-    # Run MCP in main thread (it uses stdio)
-    run_mcp_server()
+    uvicorn.run(
+        "lethus.api.rest:app",
+        host=settings.api_host,
+        port=settings.api_port,
+        log_level="info"
+    )
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Lethus - DYCP Memory System with MCP + REST API",
+        description="Lethus - DYCP Context Reduction Proxy",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
-Examples:
-    lethus --mode=mcp     # Run MCP server for LLM integration
-    lethus --mode=api     # Run REST API for web apps
-    lethus --mode=both    # Run both servers
-        """
+Lethus is an OpenAI-compatible proxy that applies Dynamic Context Pruning
+to reduce conversation history to only relevant spans.
+
+Usage with any OpenAI client:
+    from openai import OpenAI
+    client = OpenAI(
+        base_url="http://localhost:8000/v1",
+        api_key="your-openai-key"
     )
     
-    parser.add_argument(
-        "--mode",
-        choices=["mcp", "api", "both"],
-        default="mcp",
-        help="Server mode: 'mcp' (MCP tools), 'api' (REST API), or 'both'"
+The proxy automatically:
+    1. Intercepts chat requests
+    2. Applies DYCP (Kadane's Algorithm) to select relevant history
+    3. Forwards reduced context to OpenAI
+    4. Stores interactions for future retrieval
+        """
     )
     
     parser.add_argument(
         "--init-db",
         action="store_true",
         help="Initialize PostgreSQL database tables and exit"
+    )
+    
+    parser.add_argument(
+        "--host",
+        type=str,
+        default=None,
+        help="Override host (default: from config)"
+    )
+    
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=None,
+        help="Override port (default: from config)"
     )
     
     args = parser.parse_args()
@@ -84,12 +91,15 @@ Examples:
         print("Database initialized successfully.")
         return
     
-    if args.mode == "mcp":
-        run_mcp_server()
-    elif args.mode == "api":
-        run_rest_api()
-    else:
-        run_both()
+    # Override settings if provided
+    if args.host or args.port:
+        from .config import settings
+        if args.host:
+            settings.api_host = args.host
+        if args.port:
+            settings.api_port = args.port
+    
+    run_server()
 
 
 if __name__ == "__main__":

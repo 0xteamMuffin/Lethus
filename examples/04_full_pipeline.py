@@ -26,7 +26,15 @@ def main():
     
     # Initialize components
     dycp = DYCPCore(tau=0.6, theta=1.0, decay_lambda=0.98)
-    ghost = GhostGraph(use_spacy=False)
+    
+    # Try spaCy first, fall back to regex-only if not installed
+    try:
+        ghost = GhostGraph(use_spacy=True)
+        print("Using spaCy for entity extraction")
+    except RuntimeError:
+        print("spaCy not installed, using regex patterns only")
+        print("For best results: pip install spacy && python -m spacy download en_core_web_sm")
+        ghost = GhostGraph(use_spacy=False)
     
     # Simulated conversation history
     conversation = [

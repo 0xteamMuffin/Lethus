@@ -1,9 +1,0 @@
-{
-  "servers": {
-    "lethus": {
-      "command": "${workspaceFolder}/.venv/Scripts/python.exe",
-      "args": ["-m", "lethus.api.mcp"],
-      "cwd": "${workspaceFolder}/src"
-    }
-  }
-}

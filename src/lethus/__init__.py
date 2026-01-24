@@ -1,10 +1,15 @@
 """
-Lethus - DYCP Memory System with MCP + REST API
+Lethus - DYCP Context Reduction Proxy
+
+An OpenAI-compatible proxy that applies Dynamic Context Pruning
+to reduce conversation history to only relevant spans.
 
 Core components:
-- DYCP: Kadane's Algorithm for dynamic context pruning
+- DYCP: Kadane's Algorithm for optimal span selection
 - Semantic Decay: Time-weighted relevance scoring
 - Ghost Graph: Entity linking for pronoun resolution
-- Prefetch: Predictive caching for follow-up queries
+
+Usage:
+    Set base_url="http://localhost:8000/v1" in any OpenAI-compatible client.
 """
 __version__ = "0.1.0"

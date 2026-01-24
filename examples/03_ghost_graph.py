@@ -10,7 +10,7 @@ from lethus.core.ghost_graph import GhostGraph
 
 def main():
     # Initialize Ghost Graph (without spaCy for this demo)
-    ghost = GhostGraph(use_spacy=False)
+    ghost = GhostGraph(use_spacy=True)
     
     print("=" * 60)
     print("GHOST GRAPH EXAMPLE: Entity Extraction & Linking")
