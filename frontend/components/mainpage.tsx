@@ -8,18 +8,18 @@ import {
   Mic,
   ArrowUp,
   LayoutGrid,
-  Menu, 
+  Menu,
   Radar,
-  Settings
+  Settings,
 } from "lucide-react";
 import { toast, Toaster } from "sonner";
-import { 
-  streamChatCompletion, 
-  getConversationTurns, 
+import {
+  streamChatCompletion,
+  getConversationTurns,
   createConversation,
   type Turn,
   type ChatMessage as APIChatMessage,
-  type DYCPStats
+  type DYCPStats,
 } from "@/api/message";
 import { getUserSettings } from "@/api/settings";
 import ChatMessageComponent from "./ui/chat-message";
@@ -28,10 +28,10 @@ import SettingsModal from "./ui/settings-modal";
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 interface LibreChatInterfaceProps {
-    onToggleSidebar?: () => void;
-    onToggleMemory?: () => void;
-    conversationId?: number;
-    onConversationCreated?: (id: number) => void;
+  onToggleSidebar?: () => void;
+  onToggleMemory?: () => void;
+  conversationId?: number;
+  onConversationCreated?: (id: number) => void;
 }
 
 interface Message {
@@ -41,23 +41,27 @@ interface Message {
   timestamp: string;
 }
 
-const LibreChatInterface: React.FC<LibreChatInterfaceProps> = ({ 
-  onToggleSidebar, 
+const LibreChatInterface: React.FC<LibreChatInterfaceProps> = ({
+  onToggleSidebar,
   onToggleMemory,
   conversationId: propConversationId,
-  onConversationCreated
+  onConversationCreated,
 }) => {
   const [message, setMessage] = useState<string>("");
   const [isSending, setIsSending] = useState<boolean>(false);
   const [messages, setMessages] = useState<Message[]>([]);
   const [chatHistory, setChatHistory] = useState<APIChatMessage[]>([]);
-  const [conversationId, setConversationId] = useState<number | undefined>(propConversationId);
+  const [conversationId, setConversationId] = useState<number | undefined>(
+    propConversationId,
+  );
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [apiKey, setApiKey] = useState<string>("");
   const [hasApiKey, setHasApiKey] = useState<boolean>(false);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const [lastDycpStats, setLastDycpStats] = useState<DYCPStats | null>(null);
-  const [streamingMessageId, setStreamingMessageId] = useState<string | null>(null);
+  const [streamingMessageId, setStreamingMessageId] = useState<string | null>(
+    null,
+  );
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const streamingMessageRef = useRef<string>("");
@@ -65,19 +69,19 @@ const LibreChatInterface: React.FC<LibreChatInterfaceProps> = ({
   // Check if user has API key in backend on mount
   useEffect(() => {
     const checkApiKey = async () => {
-      if (typeof window === 'undefined') return;
-      
+      if (typeof window === "undefined") return;
+
       try {
         const userId = getUserId();
         if (!userId) return;
-        
+
         const settings = await getUserSettings(userId);
         setHasApiKey(settings.has_api_key);
       } catch (error) {
-        console.error('Failed to check API key:', error);
+        console.error("Failed to check API key:", error);
       }
     };
-    
+
     checkApiKey();
   }, []);
 
@@ -99,38 +103,41 @@ const LibreChatInterface: React.FC<LibreChatInterfaceProps> = ({
     try {
       setIsLoadingHistory(true);
       const turns = await getConversationTurns(convId);
-      
+
       const loadedMessages: Message[] = [];
       const loadedChatHistory: APIChatMessage[] = [];
-      
+
       turns.forEach((turn: Turn) => {
         loadedMessages.push({
           id: `${turn.id}-user`,
           content: turn.user_message,
-          sender: 'user',
+          sender: "user",
           timestamp: new Date(turn.timestamp).toLocaleTimeString([], {
             hour: "2-digit",
             minute: "2-digit",
-          })
+          }),
         });
         loadedMessages.push({
           id: `${turn.id}-ai`,
           content: turn.assistant_message,
-          sender: 'ai',
+          sender: "ai",
           timestamp: new Date(turn.timestamp).toLocaleTimeString([], {
             hour: "2-digit",
             minute: "2-digit",
-          })
+          }),
         });
-        
+
         loadedChatHistory.push({ role: "user", content: turn.user_message });
-        loadedChatHistory.push({ role: "assistant", content: turn.assistant_message });
+        loadedChatHistory.push({
+          role: "assistant",
+          content: turn.assistant_message,
+        });
       });
-      
+
       setMessages(loadedMessages);
       setChatHistory(loadedChatHistory);
     } catch (error) {
-      console.error('Failed to load conversation history:', error);
+      console.error("Failed to load conversation history:", error);
       toast.error("Failed to load conversation history");
     } finally {
       setIsLoadingHistory(false);
@@ -138,13 +145,13 @@ const LibreChatInterface: React.FC<LibreChatInterfaceProps> = ({
   };
 
   const getUserId = (): string => {
-    if (typeof window === 'undefined') {
-      return '';
+    if (typeof window === "undefined") {
+      return "";
     }
-    let userId = localStorage.getItem('user_id');
+    let userId = localStorage.getItem("user_id");
     if (!userId) {
       userId = `user_${Date.now()}_${Math.random().toString(36).substring(7)}`;
-      localStorage.setItem('user_id', userId);
+      localStorage.setItem("user_id", userId);
     }
     return userId;
   };
@@ -171,7 +178,12 @@ const LibreChatInterface: React.FC<LibreChatInterfaceProps> = ({
   };
 
   // Store turn in database
-  const storeTurn = async (convId: number, turnNumber: number, userMsg: string, assistantMsg: string) => {
+  const storeTurn = async (
+    convId: number,
+    turnNumber: number,
+    userMsg: string,
+    assistantMsg: string,
+  ) => {
     try {
       await fetch(`${API_BASE}/api/conversations/${convId}/turns`, {
         method: "POST",
@@ -183,7 +195,7 @@ const LibreChatInterface: React.FC<LibreChatInterfaceProps> = ({
         }),
       });
     } catch (error) {
-      console.error('Failed to store turn:', error);
+      console.error("Failed to store turn:", error);
     }
   };
 
@@ -222,11 +234,11 @@ const LibreChatInterface: React.FC<LibreChatInterfaceProps> = ({
 
     setMessages((prev) => [...prev, userMessage, aiMessage]);
     setStreamingMessageId(aiMessageId);
-    
+
     const newUserMessage: APIChatMessage = { role: "user", content: message };
     const updatedHistory = [...chatHistory, newUserMessage];
     setChatHistory(updatedHistory);
-    
+
     const messageToSend = message;
     setMessage("");
     if (textareaRef.current) {
@@ -237,7 +249,10 @@ const LibreChatInterface: React.FC<LibreChatInterfaceProps> = ({
       // Create conversation if this is the first message
       let currentConvId = conversationId;
       if (!currentConvId) {
-        const conv = await createConversation(getUserId(), messageToSend.slice(0, 50));
+        const conv = await createConversation(
+          getUserId(),
+          messageToSend.slice(0, 50),
+        );
         currentConvId = conv.id;
         setConversationId(currentConvId);
         onConversationCreated?.(currentConvId);
@@ -256,35 +271,42 @@ const LibreChatInterface: React.FC<LibreChatInterfaceProps> = ({
             prev.map((msg) =>
               msg.id === aiMessageId
                 ? { ...msg, content: streamingMessageRef.current }
-                : msg
-            )
+                : msg,
+            ),
           );
         },
         (stats) => {
           setStreamingMessageId(null);
           setLastDycpStats(stats);
           if (stats.tokensSaved > 0) {
-            toast.success(`DYCP saved ~${stats.tokensSaved.toLocaleString()} tokens`);
+            toast.success(
+              `DYCP saved ~${stats.tokensSaved.toLocaleString()} tokens`,
+            );
           }
-        }
+        },
       );
 
       // Update chat history with assistant response
-      const assistantMessage: APIChatMessage = { 
-        role: "assistant", 
-        content: streamingMessageRef.current 
+      const assistantMessage: APIChatMessage = {
+        role: "assistant",
+        content: streamingMessageRef.current,
       };
       setChatHistory([...updatedHistory, assistantMessage]);
 
       // Store turn in database
       const turnNumber = Math.floor(chatHistory.length / 2) + 1;
-      await storeTurn(currentConvId!, turnNumber, messageToSend, streamingMessageRef.current);
-
+      await storeTurn(
+        currentConvId!,
+        turnNumber,
+        messageToSend,
+        streamingMessageRef.current,
+      );
     } catch (error) {
       console.error(error);
-      const errorMsg = error instanceof Error ? error.message : "Failed to get response";
+      const errorMsg =
+        error instanceof Error ? error.message : "Failed to get response";
       toast.error(errorMsg);
-      
+
       // Remove the empty AI message on error
       setMessages((prev) => prev.filter((msg) => msg.id !== aiMessageId));
       setChatHistory(updatedHistory.slice(0, -1));
@@ -303,7 +325,8 @@ const LibreChatInterface: React.FC<LibreChatInterfaceProps> = ({
 
   return (
     <div className="flex-1 h-full bg-[#0a0a0a] text-gray-100 flex flex-col relative overflow-hidden w-full">
-      <Toaster position="top-center" theme="dark" />      <SettingsModal
+      <Toaster position="top-center" theme="dark" />{" "}
+      <SettingsModal
         isOpen={isSettingsOpen}
         onClose={() => setIsSettingsOpen(false)}
         onSave={handleSaveApiKey}
@@ -312,18 +335,21 @@ const LibreChatInterface: React.FC<LibreChatInterfaceProps> = ({
       />
       <header className="flex justify-between items-center px-4 md:px-6 py-3 md:py-4 text-gray-400 border-b border-[#2a2a2a] bg-[#0a0a0a] z-10 shrink-0">
         <div className="flex items-center gap-3">
-            <button onClick={onToggleSidebar} className="p-2 -ml-2 text-gray-400 hover:text-white md:hidden">
-                <Menu size={20} />
-            </button>
-            
-            <div className="flex items-center gap-2 hover:bg-[#1a1a1a] px-3 md:px-4 py-2 rounded-xl cursor-pointer transition-all duration-200 text-sm md:text-base font-medium text-gray-200">
-                <span>Lethus AI</span>
-                <ChevronDown size={16} className="text-gray-500" />
-            </div>
+          <button
+            onClick={onToggleSidebar}
+            className="p-2 -ml-2 text-gray-400 hover:text-white md:hidden"
+          >
+            <Menu size={20} />
+          </button>
+
+          <div className="flex items-center gap-2 hover:bg-[#1a1a1a] px-3 md:px-4 py-2 rounded-xl cursor-pointer transition-all duration-200 text-sm md:text-base font-medium text-gray-200">
+            <span>Lethus AI</span>
+            <ChevronDown size={16} className="text-gray-500" />
+          </div>
         </div>
 
         <div className="flex items-center gap-2">
-          <button 
+          <button
             onClick={() => setIsSettingsOpen(true)}
             className="p-2 rounded-lg hover:bg-[#1a1a1a] hover:text-white transition-all duration-200"
             title="Settings"
@@ -333,19 +359,27 @@ const LibreChatInterface: React.FC<LibreChatInterfaceProps> = ({
           <button className="p-2 rounded-lg hover:bg-[#1a1a1a] hover:text-white transition-all duration-200">
             <LayoutGrid size={18} />
           </button>
-          
-          <button onClick={onToggleMemory} className="p-2 text-gray-400 hover:text-white lg:hidden">
+
+          <button
+            onClick={onToggleMemory}
+            className="p-2 text-gray-400 hover:text-white lg:hidden"
+          >
             <Radar size={18} />
           </button>
         </div>
       </header>
-
       <main className="flex-1 flex flex-col w-full overflow-y-auto min-h-0">
         {messages.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full px-4">
             <div className="text-center max-w-2xl animate-fade-in">
               <div className="bg-white text-black p-3 rounded-full inline-flex items-center justify-center mb-6 shadow-lg shadow-white/5">
-                <svg width="32" height="32" viewBox="0 0 24 24" fill="currentColor" className="text-black">
+                <svg
+                  width="32"
+                  height="32"
+                  viewBox="0 0 24 24"
+                  fill="currentColor"
+                  className="text-black"
+                >
                   <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-5-9h10v2H7z" />
                 </svg>
               </div>
@@ -355,15 +389,21 @@ const LibreChatInterface: React.FC<LibreChatInterfaceProps> = ({
               <p className="text-sm md:text-base text-gray-500 max-w-md mx-auto leading-relaxed px-4 mb-6">
                 Context-aware AI assistant with dynamic memory management
               </p>
-              
+
               {!hasApiKey && (
                 <div className="mt-8 p-4 bg-[#121212] border border-[#2a2a2a] rounded-xl max-w-md mx-auto">
                   <div className="flex items-start gap-3 mb-3">
-                    <Settings size={18} className="text-gray-400 mt-0.5 shrink-0" />
+                    <Settings
+                      size={18}
+                      className="text-gray-400 mt-0.5 shrink-0"
+                    />
                     <div className="text-left">
-                      <h3 className="text-sm font-semibold text-white mb-1">API Key Required</h3>
+                      <h3 className="text-sm font-semibold text-white mb-1">
+                        API Key Required
+                      </h3>
                       <p className="text-xs text-gray-500">
-                        Configure your OpenAI API key in settings to start chatting
+                        Configure your OpenAI API key in settings to start
+                        chatting
                       </p>
                     </div>
                   </div>
@@ -392,7 +432,6 @@ const LibreChatInterface: React.FC<LibreChatInterfaceProps> = ({
           </div>
         )}
       </main>
-
       <footer className="w-full px-4 md:px-6 py-4 md:py-6 border-t border-[#2a2a2a] bg-[#0a0a0a] shrink-0">
         <div className="flex justify-center w-full">
           <div className="w-full max-w-3xl bg-[#121212] rounded-2xl p-3 md:p-4">
@@ -406,11 +445,11 @@ const LibreChatInterface: React.FC<LibreChatInterfaceProps> = ({
                 placeholder={isSending ? "Thinking..." : "Message Lethus AI"}
                 rows={1}
                 className="w-full bg-transparent text-white placeholder-gray-500 resize-none overflow-y-auto max-h-[150px] md:max-h-[200px] scrollbar-thin scrollbar-thumb-gray-700 scrollbar-track-transparent disabled:cursor-not-allowed disabled:opacity-50 text-sm md:text-base"
-                style={{ 
+                style={{
                   minHeight: "24px",
                   outline: "none",
                   border: "none",
-                  boxShadow: "none"
+                  boxShadow: "none",
                 }}
               />
             </div>
@@ -456,7 +495,8 @@ const LibreChatInterface: React.FC<LibreChatInterfaceProps> = ({
 
         <div className="w-full text-center mt-3 text-[10px] md:text-[11px] text-gray-600 hidden sm:block">
           <p>
-            Lethus AI uses dynamic context engineering. Verify important information.
+            Lethus AI uses dynamic context engineering. Verify important
+            information.
           </p>
         </div>
       </footer>
